@@ -37,14 +37,14 @@ def guarded(context,block_media=False):
         except Exception: request_route.abort()
     context.route('**/*', route)
 
-def blocked(page):
+def blocked(page,verified_favorite_api=False):
     challenge=page.evaluate('''()=>Array.from(document.querySelectorAll('iframe[src*="captcha"], [role="dialog"]')).some(n=>{
       const r=n.getBoundingClientRect();if(r.width<10||r.height<10||r.bottom<0||r.right<0||r.top>=innerHeight||r.left>=innerWidth)return false;
       for(let p=n;p;p=p.parentElement){const s=getComputedStyle(p);if(s.display==='none'||s.visibility==='hidden'||Number(s.opacity)===0)return false}
       return n.tagName==='IFRAME'||/安全验证|请完成验证|人机验证/.test(n.innerText||'')})''')
     if challenge:raise PlatformAccessRequired('平台要求验证码或安全验证，已停止；请在官方窗口本人完成后刷新登录状态，不自动绕过')
     text = page.locator('body').inner_text(timeout=10000)[:25000]
-    if re.search(r'访问过于频繁|操作过于频繁|账号异常|账号被封|验证后继续|请完成安全验证|unusual traffic|Verify you are human|rate limit exceeded', text, re.I) and not page.locator('#page-bbs-link .hb-bbs-link__content').count():
+    if not verified_favorite_api and re.search(r'访问过于频繁|操作过于频繁|账号异常|账号被封|验证后继续|请完成安全验证|unusual traffic|Verify you are human|rate limit exceeded', text, re.I) and not page.locator('#page-bbs-link .hb-bbs-link__content').count():
         raise PlatformAccessRequired('平台要求验证、限流或限制了访问，已停止；请在官方登录窗口人工处理后再继续，不自动绕过验证')
     return text
 
@@ -71,6 +71,9 @@ def favorites(kind, url, record, progress, cancelled=lambda:False):
         return
     if kind == 'bilibili':
         yield from bili_favorites(record, progress, cancelled)
+        return
+    if kind=='heybox':
+        yield from heybox_favorites(url,record,progress,cancelled)
         return
     with sync_playwright() as pw:
         b = sessions.browser(pw)
@@ -139,8 +142,9 @@ def favorites(kind, url, record, progress, cancelled=lambda:False):
                 for entry in entries:
                     if not content_link(kind, entry['url']): continue
                     key = adapters.canonical(entry['url'])
-                    if key not in observed: observed.add(key); fresh+=1
-                    if key in seen: continue
+                    first_observation=key not in observed
+                    if first_observation:observed.add(key);fresh+=1
+                    if not first_observation or key in seen and not progress.get('repair_incomplete'):continue
                     # YouTube's saved lists are expanded; raw playlist links aren't videos.
                     if kind == 'youtube' and '/playlist?' in entry['url']:
                         videos, limited = adapters.favorites(entry['url'])
@@ -166,6 +170,80 @@ def favorites(kind, url, record, progress, cancelled=lambda:False):
                 page.wait_for_timeout(5000)
             raise ValueError('已达到本次收藏页读取的安全上限；已保存内容，仍未到达末尾，可继续读取')
         finally: b.close()
+
+def heybox_favorites(url,record,progress,cancelled):
+    """Consume normal website pagination responses, not a range of guessed IDs."""
+    from playwright.sync_api import sync_playwright
+    from .heybox_api import Feed,PATH
+    with sync_playwright() as pw:
+        b=sessions.browser(pw)
+        try:
+            context=b.new_context(storage_state=sessions.load('heybox'));guarded(context,block_media=True)
+            page=context.new_page();feed=Feed();page.on('response',feed.response)
+            page.goto(url,wait_until='domcontentloaded',timeout=60000);page.wait_for_timeout(2500)
+            seen=set(progress.get('seen_urls',[]));observed=set();stalled=0;api_pages=0;fallback=False
+            budget=max(180,int(progress.get('pages',0))+180)
+            for _ in range(budget):
+                if cancelled():raise ValueError('用户停止读取；已登记收藏保留')
+                pages=feed.take()
+                if feed.account:
+                    previous=progress.get('account_fingerprint')
+                    if previous and previous!=feed.account:raise ValueError('账号与上次断点不同，请开始新一轮核对')
+                    progress['account_fingerprint']=feed.account
+                for value in pages:
+                    for entry in value['items']:
+                        key=adapters.canonical(entry['url'])
+                        if key in observed:continue
+                        observed.add(key)
+                        if key not in seen or progress.get('repair_incomplete'):record(entry)
+                        seen.add(key)
+                    api_pages+=1
+                    progress.update(seen_urls=sorted(seen),pages=api_pages,complete=False,
+                                    checkpoint={'offset':value['next_offset']},transport='heybox_favorites_api',
+                                    endpoint=PATH,message='按收藏接口逐页登记，仅为新来源排队正文')
+                    yield progress
+                feed.raise_error()
+                blocked(page,verified_favorite_api=bool(feed.account))
+                if pages and pages[-1]['complete']:
+                    progress.update(complete=True,message='收藏接口明确返回末尾，已登记本次可访问条目')
+                    yield progress
+                    return
+                if pages and pages[-1]['short_page']:
+                    # A short page alone is not proof; check the one returned next offset.
+                    page.wait_for_timeout(6000)
+                    if feed.error or feed.pages:continue
+                    blocked(page,verified_favorite_api=bool(feed.account))
+                    feed.verify_short_tail(context)
+                    continue
+                if pages:stalled=0
+                else:stalled+=1
+                if not feed.observed and stalled>=2:
+                    # Compatibility is confined to the actual favourites container.
+                    # Broad main-page/recommendation harvesting is never a fallback.
+                    listing=page.locator('.favour-list, .favorite-list')
+                    if not listing.count():raise ValueError('未取得小黑盒收藏接口响应；请刷新登录或等待接口适配，不从整页推荐中导入')
+                    fallback=True
+                    entries=listing.first.locator('a[href]').evaluate_all('(ns)=>ns.map(n=>({url:n.href,title:n.getAttribute("aria-label")||n.innerText||""}))')
+                    fresh=0
+                    for entry in entries:
+                        if not content_link('heybox',entry['url']):continue
+                        key=adapters.canonical(entry['url'])
+                        if key in observed:continue
+                        observed.add(key);fresh+=1
+                        if key not in seen or progress.get('repair_incomplete'):record(entry)
+                        seen.add(key)
+                    progress.update(seen_urls=sorted(seen),complete=False,transport='heybox_compatibility_page',
+                                    message='当前未取得收藏接口，仅登记专用收藏容器；未确认全部读取完成')
+                    yield progress
+                    if fresh:stalled=0
+                if stalled>=4:raise ValueError('收藏接口未继续返回下一页，当前进度已保存，未宣称读完全部收藏')
+                # Trigger the page's own signed next-page request; do not forge nonce or credentials.
+                page.evaluate('window.scrollBy(0, Math.max(innerHeight * .8, 500))')
+                if fallback or not pages:
+                    page.locator('body').evaluate('(root)=>{for(const n of root.querySelectorAll("main,section,div")){const s=getComputedStyle(n);if(["auto","scroll"].includes(s.overflowY)&&n.scrollHeight>n.clientHeight+100&&n.clientHeight>200){n.scrollTop+=Math.max(n.clientHeight*.8,500);return}}}')
+                page.wait_for_timeout(6000)
+            raise ValueError('本批收藏接口分页达到上限，已保存断点；未确认全部读取完成')
+        finally:b.close()
 
 def bili_favorites(record, progress, cancelled):
     nav = adapters.bili_api('/x/web-interface/nav', {})

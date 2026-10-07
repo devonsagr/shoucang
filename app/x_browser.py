@@ -125,7 +125,7 @@ def guard(page,errors):
 
 def favorites(record_entry,progress,cancelled):
     from playwright.sync_api import sync_playwright
-    received=[];seen=set(progress.get('seen_urls',[]));stale=0
+    received=[];seen=set(progress.get('seen_urls',[]));observed=set();stale=0
     folder=store.DATA/'x-captures'/store.uid();folder.mkdir(parents=True,exist_ok=True)
     with sync_playwright() as pw:
         browser,page,errors,paths=reader(pw,received,cancelled)
@@ -144,7 +144,9 @@ def favorites(record_entry,progress,cancelled):
                         raise ValueError('无法识别 X 书签列表结构；没有导入推荐流或把未知响应标成成功')
                     for tweet in results:
                         entry=record(tweet)
-                        if entry['url'] in seen:continue
+                        if entry['url'] in observed:continue
+                        observed.add(entry['url'])
+                        if entry['url'] in seen and not progress.get('repair_incomplete'):continue
                         record_entry(entry);seen.add(entry['url'])
                     n=progress.get('pages',0)+1
                     (folder/f'page-{n}.json').write_text(store.dumps(value),'utf-8')

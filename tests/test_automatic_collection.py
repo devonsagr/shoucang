@@ -145,7 +145,8 @@ def test_bili_all_folders_checkpoint_not_lost(local,monkeypatch):
     with pytest.raises(ValueError,match='权限拒绝'):next(iterator)
     assert not progress['complete'] and calls==[(1,1),(2,1)]
 
-def test_favorites_resume_scrolls_past_saved_cards_and_ignores_likes_end(local,monkeypatch):
+@pytest.mark.parametrize('repair',[False,True])
+def test_favorites_resume_scrolls_past_saved_cards_and_ignores_likes_end(local,monkeypatch,repair):
     """Simulate a long saved list, then one new page and an inaccessible reference."""
     from contextlib import contextmanager
     import playwright.sync_api
@@ -196,10 +197,11 @@ def test_favorites_resume_scrolls_past_saved_cards_and_ignores_likes_end(local,m
     monkeypatch.setattr(sessions,'load',lambda _:{})
     sessions.path('douyin').parent.mkdir(parents=True,exist_ok=True)
     sessions.path('douyin').write_bytes(b'fixture')
-    progress={'seen_urls':['https://www.douyin.com/video/100']};entries=[]
+    progress={'seen_urls':['https://www.douyin.com/video/100'],'repair_incomplete':repair};entries=[]
     pages=list(platform_browser.favorites('douyin','https://www.douyin.com/user/self',entries.append,progress))
     assert progress['complete'] and progress['pages']==10 and browser.closed
-    assert {entry['url'].rsplit('/',1)[-1] for entry in entries}=={'101','999'}
+    assert {entry['url'].rsplit('/',1)[-1] for entry in entries}==({'100','101','999'} if repair else {'101','999'})
+    assert len(entries)==(3 if repair else 2)
     assert next(e for e in entries if e.get('unavailable'))['url'].endswith('/999')
     assert progress['unavailable']==1 and progress['unavailable_ids']==['999']
 

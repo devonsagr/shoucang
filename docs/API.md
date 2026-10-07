@@ -21,6 +21,10 @@ Content-Type: application/json
 - `POST /api/materials/{id}/retry`：重试未完整内容；`{"refresh":true}` 主动刷新旧正文，批注和历史保留。
 - `POST /api/import`：TXT 转换后的 URL 项目或含 url/origin/text 的 JSON 数组。
 - `POST /api/favorites`：`{"platform":"heybox"}` 等，读取本人已保存登录的平台收藏页。响应任务 ID；`resume_job_id` 仅续读上次断点。
+
+默认只为新来源排队正文。明确传 `repair_incomplete: true` 时，同时为本次清单返回的既有失败、部分完成或暂停材料排队补齐；不重采已完整材料、不恢复删除记录，不补采清单外条目。`repair_queued` 是排队数，不是成功数。续读保留原任务的此选项。小黑盒通过网页重新触发原生分页并跳过已登记ID，进度里的offset用于追踪，不伪造签名直接跳过网页前几页。
+
+小黑盒优先消费网站的专用收藏接口响应，`transport=heybox_favorites_api`、`endpoint` 和 `checkpoint.offset` 在任务进度中可追溯；不会保存请求Cookie或签名参数。只接受该接口实际返回的帖子ID，校验分页连续性和账号一致性；列表摘要不是完整原文。短页另核对一次返回的下一offset，验证拒绝就停止。未取得接口时只有专用收藏容器兼容回退，且不会标成全部成功。
 - `GET /api/jobs`、`POST /api/jobs/{id}/stop`：任务状态、进度、明确末尾或中断原因。列表任务结束不代表每条正文/图片/字幕都成功。
 
 ## 知识库路径

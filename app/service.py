@@ -416,10 +416,15 @@ def sync_platform(job, payload):
     progress.setdefault('new',0); progress.setdefault('duplicates',0)
     progress['mode']='resume' if payload.get('resumed_from') else 'reconcile'
     progress.setdefault('started_at',job.get('created') or store.now())
-    progress.setdefault('only_new_content',True)
+    progress['only_new_content']=not payload.get('repair_incomplete',False)
+    progress['repair_incomplete']=bool(payload.get('repair_incomplete',False))
     progress['preserves_old_materials']=True
     progress['scope']='断点后剩余列表；中断后新增收藏请另开一次从最新开始的核对' if payload.get('resumed_from') else '从最新收藏逐页核对；只采新ID，比较清单自带完整原文，跳过已删除来源，不重采未变化正文'
+    if payload.get('repair_incomplete'):progress['scope']+='；本人选择同时补齐接口返回的既有未完成材料'
     kind = payload['platform']
+    if kind=='heybox' and payload.get('resumed_from'):
+        progress['scope']='从收藏页重新核对，跳过已登记ID并继续未读部分；不重新采集已完成正文'
+        if payload.get('repair_incomplete'):progress['scope']+='；同时补齐本次返回的未完成材料'
     progress.setdefault('message','正在低速读取 X 私人书签' if kind=='x' else '正在读取所选平台的收藏')
     def checkpoint():
         with store.db() as c:
@@ -427,6 +432,11 @@ def sync_platform(job, payload):
     checkpoint()
     def record(entry):
         result = add({**entry,'origin':'favorite'}, source=f'{kind} 官方收藏页', enqueue_collect=not entry.get('unavailable'))
+        if payload.get('repair_incomplete') and result['duplicate'] and not any(result.get(k) for k in ('retired','trashed')) and not entry.get('unavailable'):
+            item=store.get(result['id'])
+            if item['collection'] in ('failed','partial','paused') and item['content'].get('media_kind')!='video_reference':
+                retry=add({**entry,'origin':'favorite'},source=f'{kind} 已确认收藏补齐',retry_incomplete=True)
+                if retry.get('retried'):progress['repair_queued']=progress.get('repair_queued',0)+1
         if entry.get('unavailable') and not result['duplicate']:
             error='平台收藏列表标为失效或不可访问；未取得原文，链接已保留'
             with store.db() as c:
@@ -494,7 +504,7 @@ def worker(favorites_only=False):
             c.execute('BEGIN IMMEDIATE')
             kind_filter="kind='favorites'" if favorites_only else "kind<>'favorites'"
             # Enumerate X bookmarks first, before spending further reads on individual replies.
-            x_detail_gate=" AND NOT (kind='collect' AND material_id IN (SELECT id FROM materials WHERE platform='x') AND (EXISTS (SELECT 1 FROM jobs f WHERE f.kind='favorites' AND f.state IN ('queued','running') AND json_extract(f.payload,'$.platform')='x') OR EXISTS (SELECT 1 FROM jobs i WHERE i.kind='images' AND i.material_id=jobs.material_id AND i.state IN ('queued','running'))))" if not favorites_only else ''
+            x_detail_gate=" AND NOT (kind='collect' AND (EXISTS (SELECT 1 FROM materials m JOIN jobs f ON f.kind='favorites' AND f.state IN ('queued','running') AND json_extract(f.payload,'$.platform')=m.platform WHERE m.id=jobs.material_id AND m.platform IN ('x','heybox')) OR (material_id IN (SELECT id FROM materials WHERE platform='x') AND EXISTS (SELECT 1 FROM jobs i WHERE i.kind='images' AND i.material_id=jobs.material_id AND i.state IN ('queued','running')))))" if not favorites_only else ''
             # Explicit imports/retries and AI actions should not wait behind hundreds of bookmark enrichments.
             priority="CASE WHEN kind IN ('ai','subtitle_tracks','bilingual') OR (kind='collect' AND json_extract(payload,'$.x_seed') IS NULL) THEN 0 WHEN kind='images' THEN 1 ELSE 2 END"
             row = c.execute("SELECT * FROM jobs WHERE state='queued' AND "+kind_filter+x_detail_gate+" ORDER BY "+priority+", created LIMIT 1").fetchone()

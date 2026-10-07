@@ -26,7 +26,7 @@ async def lifespan(app):
     thread.join(timeout=2)
     favorite_thread.join(timeout=2)
 
-app = FastAPI(title='藏页 · 多平台收藏与批注', version='0.5.3', lifespan=lifespan, docs_url=None, redoc_url=None)
+app = FastAPI(title='藏页 · 多平台收藏与批注', version='0.5.4', lifespan=lifespan, docs_url=None, redoc_url=None)
 
 @app.get('/design/v6/reference-{variant}.png')
 def new_design_reference(variant: Literal['a','b','c','d','e','f','g']):
@@ -116,7 +116,7 @@ def health():
 
 @app.get('/api/capabilities')
 def capabilities():
-    return [{'id':key,'name':name,'favorites':'官方网页登录后读取自己的收藏页；逐页保存、去重，可停止或继续',
+    return [{'id':key,'name':name,'favorites':'网页登录后通过专用收藏接口读取自己的清单，offset分页；断点与稳定ID去重' if key=='heybox' else '官方网页登录后读取自己的收藏页；逐页保存、去重，可停止或继续',
              'content':'自动平台字幕 → 本机音频转写，逐段时间轴' if key in ('bilibili','youtube','douyin') else '正文与对应图片、已加载的部分评论；视频仅留原链接',
              'status':'B站遍历全部自建收藏夹；其他平台按实际可访问收藏页读取。页面结构与账号权限需现场验证，未到末尾不标成全部成功。'}
             for key,(name,_) in adapters.PLATFORMS.items()]
@@ -182,6 +182,7 @@ class FavoritesInput(BaseModel):
     platform: Literal['bilibili','youtube','douyin','x','heybox','xiaohongshu']
     url: str = Field(default='',max_length=4000)
     resume_job_id: str | None = None
+    repair_incomplete: bool=False
 
 @app.post('/api/favorites')
 def favorites(body: FavoritesInput):
@@ -202,12 +203,14 @@ def favorites(body: FavoritesInput):
         active=c.execute("SELECT id FROM jobs WHERE kind='favorites' AND state IN ('queued','running') AND json_extract(payload,'$.platform')=?",(kind,)).fetchone()
         if active: return {'job_id':active['id'],'duplicate':True}
         progress={}
+        repair=body.repair_incomplete
         if body.resume_job_id:
             previous=c.execute("SELECT payload,progress,state FROM jobs WHERE id=? AND kind='favorites'",(body.resume_job_id,)).fetchone()
             if not previous or json.loads(previous['payload']).get('platform')!=kind: raise ValueError('没有这个平台的可继续任务')
             progress=json.loads(previous['progress'])
+            repair=json.loads(previous['payload']).get('repair_incomplete',False)
             if progress.get('complete'): raise ValueError('上次已读到末尾；请开始一次新的导入')
-        jid=store.enqueue(c,'favorites',{'platform':kind,'url':url,**({'resumed_from':body.resume_job_id} if body.resume_job_id else {})})
+        jid=store.enqueue(c,'favorites',{'platform':kind,'url':url,'repair_incomplete':repair,**({'resumed_from':body.resume_job_id} if body.resume_job_id else {})})
         c.execute('UPDATE jobs SET progress=? WHERE id=?',(store.dumps(progress),jid))
     cfg=store.settings(); cfg.setdefault('favorite_pages',{})[kind]=url; store.save_settings(cfg)
     return {'job_id':jid,'duplicate':False}

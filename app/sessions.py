@@ -18,7 +18,7 @@ PAGES = {
     'youtube': ('https://www.youtube.com/', 'https://www.youtube.com/feed/playlists'),
     'douyin': ('https://www.douyin.com/', 'https://www.douyin.com/user/self?showTab=favorite_collection'),
     'x': ('https://x.com/login', 'https://x.com/i/bookmarks'),
-    'heybox': ('https://www.xiaoheihe.cn/app/user/favour', 'https://www.xiaoheihe.cn/app/user/favour'),
+    'heybox': ('https://www.xiaoheihe.cn/app/user/favour/content', 'https://www.xiaoheihe.cn/app/user/favour/content'),
     'xiaohongshu': ('https://www.xiaohongshu.com/', 'https://www.xiaohongshu.com/'),
 }
 

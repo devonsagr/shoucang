@@ -31,6 +31,30 @@ def test_article_summary_is_not_full_article(monkeypatch):
     result=x_browser.record(value)
     assert result['collection']=='ready' and '实际文章全文' in result['body']
 
+@pytest.mark.parametrize('repair',[False,True])
+def test_browser_resume_only_revisits_seen_sources_in_explicit_repair_mode(local,monkeypatch,repair):
+    from contextlib import contextmanager
+    import playwright.sync_api
+    class Page:
+        url='https://x.com/i/bookmarks'
+        def goto(self,*a,**kw):pass
+        def wait_for_timeout(self,ms):pass
+        def title(self):return '书签夹具'
+        def locator(self,_):return SimpleNamespace(inner_text=lambda **kw:'书签')
+        def close(self):pass
+    @contextmanager
+    def runtime():yield None
+    def reader(pw,received,cancelled):
+        received.append(('/Bookmarks',{}))
+        return SimpleNamespace(close=lambda:None),Page(),[],[]
+    monkeypatch.setattr(playwright.sync_api,'sync_playwright',runtime)
+    monkeypatch.setattr(x_browser,'reader',reader);monkeypatch.setattr(x_browser,'guard',lambda *a:None)
+    monkeypatch.setattr(x_browser,'tweets',lambda _:[tweet(),tweet()])
+    monkeypatch.setattr(x_browser,'nodes',lambda _:[{'instructions':[],'type':'TimelineTerminateTimeline','direction':'Bottom'}])
+    progress={'seen_urls':[x_browser.record(tweet())['url']],'repair_incomplete':repair};entries=[]
+    list(x_browser.favorites(entries.append,progress,lambda:False))
+    assert len(entries)==int(repair) and progress['complete']
+
 def test_transport_never_writes_and_auth_limit_stops_without_retry(local,monkeypatch):
     client,_=local;mid=material(client,'https://x.com/i/status/12345678',text='')
     calls=[]
