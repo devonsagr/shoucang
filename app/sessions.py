@@ -3,6 +3,7 @@ from __future__ import annotations
 import ctypes
 import json
 import math
+from contextlib import contextmanager
 import os
 import queue
 import threading
@@ -92,16 +93,27 @@ def import_state(kind,state):
     with store.db() as c:store.event(c,None,'platform_session_imported',{'platform':kind,'source':'authorized_browser_snapshot','cookies':len(cookies)})
     return {'platform':kind,'saved':True,'cookie_count':len(cookies),'verification':'登录快照已保存，下次可直接复用；访问权限在实际读取时核对'}
 
+def requires_verification(kind,connection=None):
+    if connection is None:
+        with store.db() as c:return requires_verification(kind,c)
+    row=connection.execute("""SELECT
+      coalesce(max(CASE WHEN kind='platform_capture_paused' THEN id END),0),
+      coalesce(max(CASE WHEN kind IN ('platform_session_saved','platform_session_imported') THEN id END),0)
+      FROM events WHERE kind IN ('platform_capture_paused','platform_session_saved','platform_session_imported')
+      AND json_extract(detail,'$.platform')=?""",(kind,)).fetchone()
+    return row[0]>row[1]
+
 def status(kind):
     with store.db() as c:
         last = c.execute("SELECT id,state,error,progress FROM jobs WHERE kind='favorites' AND json_extract(payload,'$.platform')=? ORDER BY created DESC LIMIT 1", (kind,)).fetchone()
     last = dict(last) if last else None
     if last: last['progress'] = json.loads(last['progress'])
-    return {'platform': kind, 'saved': path(kind).exists(), 'login': LOGIN.get(kind, {'state':'closed'}),
+    access_required=requires_verification(kind)
+    return {'platform': kind, 'saved': path(kind).exists(), 'access_required':access_required,'login': LOGIN.get(kind, {'state':'closed'}),
             'last_sync': last, 'favorite_url': store.settings().get('favorite_pages', {}).get(kind, PAGES[kind][1]),
             'x_client_id': store.settings().get('x_client_id','') if kind=='x' else '',
             'read_mode': store.settings().get('x_read_mode','session') if kind=='x' else 'session',
-            'verification': '登录状态已保存；收藏权限在实际读取时验证' if path(kind).exists() else '尚未登录'}
+            'verification': '平台需要本人验证；在已有Chrome窗口处理后保存登录，再重试' if access_required else '登录状态已保存；收藏权限在实际读取时验证' if path(kind).exists() else '尚未登录'}
 
 def browser_executable():
     roots=[Path(os.environ.get('PROGRAMFILES','C:/Program Files')),Path(os.environ.get('PROGRAMFILES(X86)','C:/Program Files (x86)'))]
@@ -134,7 +146,7 @@ def login_browser(pw,kind):
             version=httpx.get(endpoint+'/json/version',timeout=2,trust_env=False).json()
             if version.get('webSocketDebuggerUrl','').endswith(previous['browser_path']):
                 b=pw.chromium.connect_over_cdp(endpoint);context=b.contexts[0]
-                page=next((p for p in context.pages if belongs(kind,urlparse(p.url).hostname or '')),None)
+                page=next((p for p in reversed(context.pages) if belongs(kind,urlparse(p.url).hostname or '')),None)
                 return b,context,page or context.new_page()
         except Exception:pass
     with socket.socket() as sock:
@@ -162,6 +174,39 @@ LOGIN = {}
 LOCK = threading.Lock()
 THREAD = None
 URLS = {}
+
+@contextmanager
+def capture_session(pw,kind):
+    """Heybox uses the same owned Chrome profile that the person verified."""
+    b=page=None;failed=False
+    try:
+        if kind=='heybox':
+            if LOGIN.get(kind,{}).get('state') in ('opening','open','saving'):
+                raise ValueError('请先在平台窗口完成验证并保存登录，再读取材料')
+            b,context,_=login_browser(pw,kind)
+            page=context.new_page()
+        else:
+            b=browser(pw);context=b.new_context(storage_state=load(kind));page=context.new_page()
+        yield context,page
+    except Exception as exc:
+        failed=True
+        from .platform_browser import PlatformAccessRequired
+        if kind=='heybox' and page and isinstance(exc,PlatformAccessRequired):
+            # Keep the actual challenged tab for the person; its routes belong to this reader.
+            try:page.unroute('**/*')
+            except Exception:pass
+            page=None
+        raise
+    finally:
+        try:
+            if page:page.close()
+        except Exception:
+            if not failed:raise
+        finally:
+            try:
+                if b:b.close()
+            except Exception:
+                if not failed:raise
 
 def command(kind, action):
     global THREAD
@@ -206,11 +251,16 @@ def login_worker():
                     b,context,page = login_browser(pw,kind)
                     opened[kind] = (b, context, page)
                     target=URLS.get(kind,store.settings().get('favorite_pages',{}).get(kind,PAGES[kind][1] if path(kind).exists() else PAGES[kind][0]))
-                    page.goto(target, wait_until='domcontentloaded', timeout=60000)
+                    from . import adapters
+                    if kind!='heybox' or adapters.canonical(page.url)!=adapters.canonical(target):
+                        page.goto(target, wait_until='domcontentloaded', timeout=60000)
                     LOGIN[kind] = {'state':'open', 'message':'已打开原有Chrome资料目录；已登录可直接使用，过期时本人登录后保存'}
                 elif action == 'save':
                     b, context, page = opened[kind]
-                    save(kind, context.storage_state())
+                    if kind=='heybox':
+                        from .platform_browser import blocked
+                        blocked(page)
+                    import_state(kind, context.storage_state())
                     current = page.url
                     if belongs(kind, urlparse(current).hostname or ''):
                         favorite = current if any(part in current for part in ('favour','favorite','collect','bookmark','playlist','/user/profile/')) else PAGES[kind][1]

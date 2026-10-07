@@ -26,7 +26,7 @@ async def lifespan(app):
     thread.join(timeout=2)
     favorite_thread.join(timeout=2)
 
-app = FastAPI(title='藏页 · 多平台收藏与批注', version='0.5.4', lifespan=lifespan, docs_url=None, redoc_url=None)
+app = FastAPI(title='藏页 · 多平台收藏与批注', version='0.5.5', lifespan=lifespan, docs_url=None, redoc_url=None)
 
 @app.get('/design/v6/reference-{variant}.png')
 def new_design_reference(variant: Literal['a','b','c','d','e','f','g']):
@@ -127,6 +127,7 @@ def accounts():
 
 class LoginInput(BaseModel):
     action: Literal['open','save','close','forget']
+    url: str = Field(default='',max_length=4000)
 
 class BrowserSessionInput(BaseModel):
     state: dict
@@ -149,6 +150,11 @@ def import_browser_session(kind:str,body:BrowserSessionInput):
 @app.post('/api/accounts/{kind}/login')
 def login(kind: str, body: LoginInput):
     if kind not in sessions.PAGES: raise ValueError('未知平台')
+    if body.url:
+        if body.action!='open':raise ValueError('指定页面只用于打开验证窗口')
+        platform_browser.safe_page(kind,body.url)
+        sessions.URLS[kind]=body.url
+    elif body.action=='open':sessions.URLS.pop(kind,None)
     if body.action == 'forget':
         cfg = store.settings(); old = cfg.setdefault('cookies',{}).pop(kind,None)
         if old:
@@ -188,6 +194,7 @@ class FavoritesInput(BaseModel):
 def favorites(body: FavoritesInput):
     kind=body.platform
     if not sessions.path(kind).exists(): raise ValueError('请先打开该平台官方登录窗口，完成登录并保存状态')
+    if sessions.requires_verification(kind):raise ValueError('平台需要本人验证；先在已有Chrome窗口处理并保存登录，再导入或续读')
     if kind=='x':
         if store.settings().get('x_read_mode','session')=='oauth':
             if not xofficial.configured(): raise ValueError('请先完成 X 官方 OAuth 授权')
@@ -324,7 +331,7 @@ class BatchMaterialItem(BaseModel):
     revision: int = Field(ge=1)
 
 class BatchMaterialsInput(BaseModel):
-    action: Literal['trash','restore','purge']
+    action: Literal['trash','restore','purge','retry']
     items: list[BatchMaterialItem] = Field(min_length=1,max_length=100)
     confirmation: Literal['彻底删除'] | None = None
 
@@ -499,15 +506,9 @@ def bilingual_reading(mid: str):
 
 @app.post('/api/materials/{mid}/retry')
 def retry(mid: str, body: RetryInput):
-    if mid.startswith('l1_'):raise ValueError('第一层不重复抓取；请打开原始收藏后重试')
-    item = store.available(mid)
-    if item['collection'] == 'ready' and not body.refresh:
-        raise ValueError('已取得正文；如需修改请补充原文，保留旧版本')
-    with store.db() as c:
-        c.execute('BEGIN IMMEDIATE')
-        jid = store.enqueue(c, 'collect', body.model_dump(), mid)
-        c.execute("UPDATE materials SET collection='queued',error='' WHERE id=?", (mid,))
-    return {'job_id': jid}
+    result=service.retry_capture(mid,**body.model_dump())
+    if result.get('skipped'):raise ValueError('内容已完整，无需重试；需要刷新原文时请选择重新采集')
+    return result
 
 @app.get('/api/vault/notes')
 def vault_notes(folder: str='',query: str=''):

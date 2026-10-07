@@ -26,6 +26,8 @@ assert(separated.indexOf('</figure>')<separated.indexOf('这段文字'));
 assert(separated.indexOf('这段文字')<separated.lastIndexOf('<figure'));
 assert.equal(context.imageCaption('帖子图片 2'),'');
 assert.equal(context.imageCaption('不同年份的录音室照片'),'不同年份的录音室照片');
+const commentThumbnail=context.richContent('回复正文\n\n![图解](images/a.png)',groupMaterial,'comment:0');
+assert(commentThumbnail.includes('media-group multiple')&&commentThumbnail.includes('data-image-count="1"'));
 console.log('Reader checks passed: image order, local route, HTML escaping, URL safety, remote/path protection');
 
 context.bilingualVisible=true;

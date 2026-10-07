@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "藏页 · 登录快照",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "description": "仅在你点击时导出所选平台的登录快照，用于本机收藏采集。",
   "permissions": ["cookies", "downloads"],
   "optional_host_permissions": ["https://*.bilibili.com/*", "https://*.youtube.com/*", "https://*.douyin.com/*", "https://*.iesdouyin.com/*", "https://*.x.com/*", "https://*.twitter.com/*", "https://*.xiaoheihe.cn/*", "https://*.xiaohongshu.com/*"],

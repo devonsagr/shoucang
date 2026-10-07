@@ -75,3 +75,24 @@ def test_invalid_batch_has_no_side_effects(local,change):
     body={'action':'trash','items':[{'id':mid,'revision':before['revision']}]};change(body)
     assert client.post('/api/materials/batch-actions',json=body).status_code in (400,422)
     assert store.get(mid)==before
+
+def test_batch_retry_skips_complete_and_deduplicates_existing_jobs(local):
+    client,_,_=local;complete=material('451001');failed=material('451002')
+    with store.db() as c:c.execute("UPDATE materials SET collection='failed' WHERE id=?",(failed,))
+    old=store.get(failed)
+    r=request(client,'retry',[complete,failed]).json()
+    assert r['succeeded']==2 and r['results'][0]['skipped'] and r['results'][1]['kind']=='collect'
+    again=request(client,'retry',[failed]).json();assert again['results'][0]['duplicate']
+    with store.db() as c:
+        assert c.execute("SELECT count(*) FROM jobs WHERE material_id=? AND kind='collect' AND state='queued'",(failed,)).fetchone()[0]==1
+        assert not c.execute("SELECT 1 FROM jobs WHERE kind='ai'").fetchone()
+    item=store.get(failed)
+    assert item['body']==old['body'] and item['notes']==old['notes'] and item['processing']==old['processing']
+
+def test_batch_retry_reports_stale_trash_first_layer_and_missing_individually(local):
+    client,_,_=local;a,b=material('451003'),material('451004');_,layer=first(client,a)
+    revision=store.get(a)['revision'];client.put('/api/materials/'+a+'/notes',json={'revision':revision,'notes':'新批注'})
+    request(client,'trash',[b])
+    r=client.post('/api/materials/batch-actions',json={'action':'retry','items':[{'id':a,'revision':revision},{'id':b,'revision':store.get(b)['revision']},{'id':layer,'revision':store.get(layer)['revision']},{'id':'missing','revision':1}]}).json()
+    assert r['failed']==4 and r['succeeded']==0 and all(not i['ok'] for i in r['results'])
+    assert store.get(a)['notes']=='新批注' and store.get(b)['trashed']

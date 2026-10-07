@@ -13,7 +13,7 @@ function fixture(count=130){
     api:async(path,method,body)=>{
       requests.push(body);if(c.networkFailure&&requests.length===2)throw Error('连接中断');
       const results=body.items.map(m=>({id:m.id,ok:m.id!==c.failId,...(m.id===c.failId?{error:'材料已改变，请重新勾选后重试'}:{revision:m.revision+1}),...(m.id===c.warnId?{warning:'状态已保存，清理需核对'}:{})}));
-      const successful=new Set(results.filter(r=>r.ok).map(r=>r.id));remaining=remaining.filter(m=>!successful.has(m.id));
+      const successful=new Set(results.filter(r=>r.ok).map(r=>r.id));if(body.action!=='retry')remaining=remaining.filter(m=>!successful.has(m.id));
       if(c.duringRequest)c.duringRequest();return {results};
     },
     refresh:async()=>{c.catalogueItems=remaining;c.updateSelectionScope();const available=new Set(remaining.map(m=>m.id));for(const id of c.checkedMaterials.keys())if(!available.has(id))c.checkedMaterials.delete(id);},
@@ -55,6 +55,9 @@ async function run(){
   f=fixture(250);f.c.chooseAllMaterials(true);f.c.networkFailure=true;await f.c.runMaterialBatch('trash');
   assert.equal(f.requests.length,2,'a broken connection must stop rather than keep submitting unconfirmed batches');
   assert.equal(f.c.checkedMaterials.size,150);assert.equal(f.c.batchFailures.length,150);assert(f.messages[0][0].includes('结果待核对'));
+  f=fixture();f.c.chooseAllMaterials(true);await f.c.runMaterialBatch('retry');
+  assert.deepEqual(f.requests.map(r=>r.items.length),[100,30]);assert.equal(f.c.catalogueItems.length,130);assert.equal(f.c.selected,'m50');
+  assert.equal(f.c.checkedMaterials.size,0);assert(f.messages[0][0].includes('排队 130 条')&&!f.messages[0][0].includes('采集成功'));
   console.log('Selection: full-filter/snapshot scope, chunking, partial failure, next reader, draft guards and interrupted request recovery passed');
 }
 run().catch(e=>{console.error(e);process.exitCode=1;});

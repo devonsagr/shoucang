@@ -19,6 +19,7 @@ Content-Type: application/json
 - `GET /api/materials`：按平台、主题、处理/采集状态、来源和全文查询；返回条目和当前范围计数。
 - `GET /api/materials/{id}`：原文、字幕来源、分段、批注、历史与当前任务。`reading_preview` 仅供界面筛选，不属于处理输入或持久化摘要。
 - `POST /api/materials/{id}/retry`：重试未完整内容；`{"refresh":true}` 主动刷新旧正文，批注和历史保留。
+- `POST /api/accounts/{platform}/login`：`{"action":"open","url":"该平台的原文链接"}` 打开同平台验证页；`url` 可省略，默认登录或收藏入口。本人完成后用 `{"action":"save"}` 保存；小黑盒页面仍有可见验证时拒绝保存。`GET /api/accounts` 的 `access_required` 表示仍需本人处理。
 - `POST /api/import`：TXT 转换后的 URL 项目或含 url/origin/text 的 JSON 数组。
 - `POST /api/favorites`：`{"platform":"heybox"}` 等，读取本人已保存登录的平台收藏页。响应任务 ID；`resume_job_id` 仅续读上次断点。
 
@@ -86,3 +87,5 @@ Content-Type: application/json
 `destination` 也支持 `markdown`、`knowledge`、`todo`。这三项目前生成本机 outbox 的 Markdown/JSON/附件，**不会创建外部待办、发消息或调用某个任务系统**。下游工具可按确认回执和 `idempotency_key` 消费；接入某个外部工具时需另行实现适配及写入确认。
 
 删除为可恢复回收：`DELETE /api/materials/{id}`；恢复为 `POST /api/materials/{id}/restore`。永久删除需 `/purge` 的当前 revision 和确认文字；批量接口同样逐条检查修订、文件归属和哈希。不要绕过预览/确认直接操作数据库或知识库文件。
+
+`POST /api/materials/batch-actions` 的 `action` 支持 `trash/restore/purge/retry`，每请求1–100个 `{id,revision}`；界面把更大选择分批提交。重试返回逐条 `job_id` 与 `kind`（`images`或`collect`），完整条目为 `skipped`，已在队列为 `duplicate`；这些是排队回执，不是采集成功。重试不能写第一层快照或回收条目。`/api/accounts` 的 `access_required` 表示上次平台拒绝尚待本人处理，即使已保存Cookie也不表示权限可用；保存或导入最新单平台状态后允许下一次读取核验。

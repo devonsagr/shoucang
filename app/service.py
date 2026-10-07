@@ -148,15 +148,42 @@ def save_content(mid, result, preserve_processing=False):
     store.archive(mid)
 
 def needs_images(item):
+    if assets.needs_retry(item):return True
     known = {a['path'] for a in item['content'].get('media',[]) if a.get('status')=='saved'}
     texts = [item['body'], *(c.get('body','') for c in item['content'].get('comments',[]))]
     return any(match[2] not in known for text in texts for match in assets.IMAGE.finditer(text))
 
 def queue_images(mid):
-    if not needs_images(store.get(mid)):return
+    item=store.get(mid)
+    if not needs_images(item):return
     with store.db() as c:
-        store.enqueue(c,'images',{},mid)
+        store.enqueue(c,'images',{'source_complete':item['collection']=='ready' or item['content'].get('original_text_complete') is True},mid)
         c.execute("UPDATE materials SET collection='queued' WHERE id=?",(mid,))
+
+def retry_capture(mid, *, revision=None,refresh=False,transcribe=True,engine='local'):
+    if mid.startswith('l1_'):raise ValueError('第一层是原文快照，请打开原始收藏重试')
+    with store.db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        row=c.execute('SELECT * FROM materials WHERE id=?',(mid,)).fetchone()
+        if not row:raise ValueError('材料不存在')
+        item=store.unpack(row)
+        if item['trashed']:raise ValueError('材料在回收站，请先恢复')
+        if revision is not None and item['revision']!=revision:raise ValueError('材料已改变，请重新勾选后重试')
+        active=c.execute("SELECT id,kind FROM jobs WHERE material_id=? AND kind IN ('collect','images') AND state IN ('queued','running') LIMIT 1",(mid,)).fetchone()
+        if active:return {'job_id':active['id'],'kind':active['kind'],'duplicate':True}
+        missing=assets.needs_retry(item)
+        if item['collection']=='ready' and not missing and not refresh:return {'skipped':True,'reason':'内容已完整'}
+        source_complete=item['content'].get('original_text_complete') is True or item['collection']=='ready' and item['content'].get('original_text_complete') is not False
+        images_only=missing and bool(item['body']) and source_complete and not assets.needs_source(item) and not refresh
+        if item['platform'] in ('bilibili','youtube','douyin'):
+            images_only=images_only and bool(item['content'].get('segments')) and item['content'].get('transcript_state')!='uncertain'
+        kind='images' if images_only else 'collect'
+        if kind=='collect' and sessions.requires_verification(item['platform'],c):
+            raise ValueError('平台需要本人验证；在“导入收藏”打开已有Chrome窗口并保存登录后，再批量重试')
+        jid=store.enqueue(c,kind,{'source_complete':True} if images_only else {'transcribe':True,'engine':engine},mid)
+        c.execute("UPDATE materials SET collection='queued',error='' WHERE id=?",(mid,))
+        store.event(c,mid,'capture_retry_requested',{'job_id':jid,'kind':kind,'source_preserved':True})
+    return {'job_id':jid,'kind':kind,'duplicate':False}
 
 def save_knowledge_context(mid,paths,revision):
     selected=knowledge.select(paths)
@@ -322,6 +349,8 @@ def run_job(job):
     if mid and store.get(mid).get('trashed'): raise ValueError('材料已删除，任务停止；原文保留在回收站')
     if job['kind'] == 'collect':
         item = store.get(mid)
+        if sessions.requires_verification(item['platform']):
+            raise platform_browser.PlatformAccessRequired('平台需要本人验证；先在已有Chrome窗口处理并保存登录，再重试')
         folder = store.material_folder(mid) / ('capture-' + job['id'])
         folder.mkdir(parents=True, exist_ok=True)
         with store.db() as c:
@@ -348,10 +377,13 @@ def run_job(job):
             with store.db() as c:c.execute('UPDATE jobs SET progress=?,updated=? WHERE id=?',(store.dumps(progress),store.now(),job['id']))
         save_bilingual(mid,job['id'],report)
     elif job['kind'] == 'images':
+        from .source_content import fingerprint
         item = store.get(mid)
+        source_snapshot=fingerprint(item)
         folder = store.material_folder(mid)/('capture-'+job['id'])
         article_incomplete=item['content'].get('article') and not item['content'].get('article_complete')
-        incomplete=article_incomplete or item['content'].get('original_text_complete') is False
+        source_complete=item['content'].get('original_text_complete') is True or payload.get('source_complete') is True
+        incomplete=article_incomplete or item['content'].get('original_text_complete') is False or bool(item['content'].get('missing_image_count')) or not source_complete
         result = {'title':item['title'], 'body':item['body'], 'content':item['content'], 'collection':'partial' if incomplete else 'ready'}
         result=assets.localize(result,folder,mid,item['url'])
         with store.db() as c:
@@ -361,7 +393,9 @@ def run_job(job):
             if stale:
                 requeued=None
                 if row and not row['trashed'] and needs_images(store.unpack(row)):
-                    requeued=store.enqueue(c,'images',{},mid,exclude_job=job['id'])
+                    current=store.unpack(row)
+                    same_source=fingerprint(current)==source_snapshot
+                    requeued=store.enqueue(c,'images',{'source_complete':bool(source_complete and same_source)},mid,exclude_job=job['id'])
                     c.execute("UPDATE materials SET collection='queued' WHERE id=?",(mid,))
                 store.event(c,mid if row else None,'images_stale',{'job_id':job['id'],'requeued':requeued})
             else:
@@ -435,8 +469,8 @@ def sync_platform(job, payload):
         if payload.get('repair_incomplete') and result['duplicate'] and not any(result.get(k) for k in ('retired','trashed')) and not entry.get('unavailable'):
             item=store.get(result['id'])
             if item['collection'] in ('failed','partial','paused') and item['content'].get('media_kind')!='video_reference':
-                retry=add({**entry,'origin':'favorite'},source=f'{kind} 已确认收藏补齐',retry_incomplete=True)
-                if retry.get('retried'):progress['repair_queued']=progress.get('repair_queued',0)+1
+                retry=retry_capture(result['id'])
+                if retry.get('job_id') and not retry.get('duplicate'):progress['repair_queued']=progress.get('repair_queued',0)+1
         if entry.get('unavailable') and not result['duplicate']:
             error='平台收藏列表标为失效或不可访问；未取得原文，链接已保留'
             with store.db() as c:

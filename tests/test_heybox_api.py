@@ -96,6 +96,7 @@ def test_browser_adapter_consumes_favourite_api_and_resume_skips_known_ids_not_p
     def runtime():yield None
     monkeypatch.setattr(playwright.sync_api,'sync_playwright',runtime)
     monkeypatch.setattr(sessions,'browser',lambda _:browser);monkeypatch.setattr(sessions,'load',lambda _: {})
+    monkeypatch.setattr(sessions,'login_browser',lambda pw,kind:(browser,context,page));page.close=lambda:None;page.route=context.route;page.unroute=lambda *a:None
     monkeypatch.setattr(platform_browser,'blocked',lambda *a,**kw: '')
     sessions.path('heybox').parent.mkdir(parents=True,exist_ok=True);sessions.path('heybox').write_bytes(b'fixture')
     progress={'seen_urls':['https://www.xiaoheihe.cn/app/bbs/link/97001']};entries=[]
@@ -131,6 +132,7 @@ def test_browser_keeps_valid_page_before_verification_and_does_not_claim_the_end
         return ''
     monkeypatch.setattr(playwright.sync_api,'sync_playwright',runtime)
     monkeypatch.setattr(sessions,'browser',lambda _:browser);monkeypatch.setattr(sessions,'load',lambda _: {})
+    monkeypatch.setattr(sessions,'login_browser',lambda pw,kind:(browser,context,page));page.close=lambda:None;page.route=context.route;page.unroute=lambda *a:None
     monkeypatch.setattr(platform_browser,'blocked',blocked)
     sessions.path('heybox').parent.mkdir(parents=True,exist_ok=True);sessions.path('heybox').write_bytes(b'fixture')
     entries=[];progress={}

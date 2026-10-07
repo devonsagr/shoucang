@@ -203,7 +203,7 @@ function renderSelectionControls(){
   $('#selectAll').checked=Boolean(total&&count===total);$('#selectAll').indeterminate=count>0&&count<total;$('#selectAll').disabled=batchRunning||!ready||!total;
   $('#selectAllLabel').textContent=`全选 ${total} 条`;$('#selectAll').setAttribute('aria-label',`全选当前筛选的 ${total} 条材料`);
   $('#selectionCount').textContent=batchRunning?batchProgress:`已选 ${count} 条`;
-  for(const [id,visible] of [['batchTrashBtn',!trashCatalogue()],['batchRestoreBtn',trashCatalogue()],['batchPurgeBtn',trashCatalogue()]]){
+  for(const [id,visible] of [['batchRetryBtn',!trashCatalogue()&&!inFirstLibrary()],['batchTrashBtn',!trashCatalogue()],['batchRestoreBtn',trashCatalogue()],['batchPurgeBtn',trashCatalogue()]]){
     $('#'+id).hidden=!visible;$('#'+id).disabled=batchRunning||!ready||!count;
   }
   document.querySelectorAll('[data-select-id]').forEach(input=>{input.checked=checkedMaterials.has(input.dataset.selectId);input.disabled=batchRunning;input.closest('.material-card').classList.toggle('checked-for-batch',input.checked);});
@@ -220,22 +220,23 @@ async function runMaterialBatch(action,targets=batchTargets(),confirmation){
   const queue=targets.some(m=>m.id===selected)?captureSourceQueue(selected):null;
   const failures=[],warnings=[];
   batchRunning=true;batchFailures=failures;batchProgress=`处理中 0 / ${targets.length}`;purgeSelection=null;renderSelectionControls();
-  const succeeded=new Set();let uncertain=false;
+  const succeeded=new Set();let uncertain=false,skipped=0,duplicates=0;
   try{
     if(queue&&dirty){await saveNotes();if(dirty||sourceQueueContext()!==context||selected!==queue.id)throw new Error('批注有新改动，请先保存后重试');targets=targets.map(m=>m.id===current.id?{...m,revision:current.revision}:m);}
     for(let offset=0;offset<targets.length;offset+=100){
       const chunk=targets.slice(offset,offset+100);
       try{
         const result=await api('/materials/batch-actions','POST',{action,items:chunk.map(m=>({id:m.id,revision:m.revision})),...(confirmation?{confirmation}:{})});
-        for(const outcome of result.results){const target=chunk.find(m=>m.id===outcome.id);if(!target)continue;if(outcome.ok){succeeded.add(outcome.id);if(selectionScope===context)checkedMaterials.delete(outcome.id);if(outcome.warning)warnings.push({...target,warning:true,error:outcome.warning});}else failures.push({...target,error:outcome.error});}
+        for(const outcome of result.results){const target=chunk.find(m=>m.id===outcome.id);if(!target)continue;if(outcome.ok){succeeded.add(outcome.id);skipped+=Number(Boolean(outcome.skipped));duplicates+=Number(Boolean(outcome.duplicate));if(selectionScope===context)checkedMaterials.delete(outcome.id);if(outcome.warning)warnings.push({...target,warning:true,error:outcome.warning});}else failures.push({...target,error:outcome.error});}
       }catch(error){
         uncertain=true;failures.push(...targets.slice(offset).map(m=>({...m,error:`结果未确认：${error.message}。请重新勾选后重试。`})));break;
       }
       batchProgress=`处理中 ${Math.min(offset+100,targets.length)} / ${targets.length}`;renderSelectionControls();
     }
-    if(queue&&succeeded.has(queue.id))await continueCatalogue(queue,succeeded);else await refresh();
+    if(action!=='retry'&&queue&&succeeded.has(queue.id))await continueCatalogue(queue,succeeded);else await refresh();
   }finally{batchRunning=false;batchFailures=selectionScope===context?[...failures,...warnings]:[];renderSelectionControls();}
   const label={trash:'移入回收站',restore:'恢复',purge:'彻底删除'}[action];
+  if(action==='retry'){toast(`重试已排队 ${succeeded.size-skipped-duplicates} 条${duplicates?` · 已在队列 ${duplicates} 条`:''}${skipped?` · 已完整跳过 ${skipped} 条`:''}${failures.length?` · ${failures.length} 条未排队，请查看原因`:''}。采集结果见材料状态。`,Boolean(failures.length));return;}
   toast(`已${label} ${succeeded.size} 条${failures.length?`，${failures.length} 条${uncertain?'结果待核对':'未完成，请查看列表上方原因'}`:''}${warnings.length?`；${warnings.length} 条存档或清理需核对`:''}`,Boolean(failures.length||warnings.length));
 }
 function previewBatchPurge(){
@@ -326,7 +327,7 @@ function richContent(text,m,prefix="body"){
   let result='',end=0,images=[];const source=String(text||'');
   let paragraphIndex=0;
   const paragraphs=value=>value.trim().split(/\n\s*\n/).filter(Boolean).map(p=>{const key=prefix+':'+paragraphIndex++,unit=typeof bilingualVisible!=='undefined'&&bilingualVisible?m.reader_translation?.units?.[key]:null;return `<p>${inlineReadingText(p)}</p>${unit?`<p class="reading-translation" lang="${escape(unit.language)}" title="${escape(unit.source)}"><span class="translation-label">${unit.source.includes('平台')?'平台译文':'机器译文'}</span>${escape(unit.text).replace(/\n/g,'<br>')}</p>`:''}`;}).join('');
-  const flush=()=>{if(images.length){result+=`<div class="media-group ${images.length===1?'single':'multiple'}" data-image-count="${images.length}">${images.join('')}</div>`;images=[];}};
+  const flush=()=>{if(images.length){result+=`<div class="media-group ${images.length===1&&!prefix.startsWith('comment:')?'single':'multiple'}" data-image-count="${images.length}">${images.join('')}</div>`;images=[];}};
   for(const hit of source.matchAll(/!\[([^\]\n]*)\]\(([^\s)]+)(?:\s+"[^"]*")?\)/g)){
     const before=source.slice(end,hit.index);if(before.trim()){flush();result+=paragraphs(before);}
     const asset=(m.content.media||[]).find(a=>a.status==='saved'&&a.path===hit[2]);
@@ -363,7 +364,7 @@ function renderDetail(m) {
   <details class="provenance"><summary><span>来源与采集记录</span><span class="disclosure-meta">${icon('chevron')}</span></summary><div class="provenance-body"><strong>${segments.length?transcriptTitle:'原文存档'}</strong><p>${escape(m.content.source||'正在等待取得原文')}</p>${segments.length?`<p>字幕来源：${escape(subtitleSource)} · 保留完整时间轴</p>`:''}${ready&&m.content.warning?`<p>${escape(m.content.warning)}</p>`:''}<a class="download-link" href="/api/materials/${m.id}/markdown" aria-label="下载 Markdown" title="下载 Markdown">${icon('download')}<span>下载 Markdown</span></a></div></details>
   <div id="captureProgress" class="capture-progress" role="status" ${m.progress?.message?'':'hidden'}>${escape(m.progress?.message||'')}</div>
   ${m.error||(!ready&&m.content.warning)?`<div class="warning">${escape(m.error||m.content.warning)}</div>`:''}
-  ${!ready&&!m.trashed?'<div class="minor-actions"><button id="retryAction">重试收集</button><button id="supplementInline">补充原文 / 字幕</button></div>':''}
+  ${!ready&&!m.trashed?`<div class="minor-actions"><button id="retryAction">重试收集</button>${m.platform!=='web'&&names[m.platform]&&/验证|验证码|限流|拒绝/.test(m.error||'')?'<button id="verifyAccountAction">登录验证</button>':''}<button id="supplementInline">补充原文 / 字幕</button></div>`:''}
   ${renderReadingPreview(m)}
   ${video?`<div id="videoWorkbench" class="video-workbench ${video.platform==='douyin'?'douyin-player':''}"><section class="video-column" aria-label="平台视频"><div class="video-frame" data-player-platform="${video.platform}"><iframe id="platformPlayer" title="${escape(platformName(m))}原站视频播放器" scrolling="no" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></div></section><div class="caption-wrap"><section id="transcriptSection" class="caption-panel" aria-label="逐句字幕"></section></div><button id="exitVideo" class="fullscreen-exit" aria-label="退出视频字幕全屏">${icon('close')}退出全屏</button></div><div class="video-notes"><div class="player-caption"><span id="playerStatus" role="status">原站嵌入播放 · 不下载视频</span><div class="player-tools"><button id="focusVideo" class="text-button">${icon('expand')}全屏阅读</button>${video.platform==='douyin'?'<button id="retryPlayback" class="text-button" hidden>重试页内播放</button>':''}<a href="${safeLink(m.content.resolved_url||m.url)}" target="_blank" rel="noopener noreferrer">原站 ${icon('arrow')}</a></div></div><details class="video-description"><summary><span>视频说明与封面</span><span class="disclosure-meta">${icon('chevron')}</span></summary><section id="originalSection">${originalBody}</section></details></div>`:segments.length?`<div class="reading-controls"><div class="reader-tabs" role="tablist" aria-label="视频材料阅读方式"><button id="transcriptTab" role="tab" aria-controls="transcriptSection" data-reader-tab="transcript" aria-selected="${readerTab==='transcript'}">逐段字幕</button><button id="originalTab" role="tab" aria-controls="originalSection" data-reader-tab="original" aria-selected="${readerTab==='original'}">视频说明</button></div></div>
   <section id="transcriptSection" role="tabpanel" aria-labelledby="transcriptTab" ${readerTab==='original'?'hidden':''}></section>
@@ -420,7 +421,8 @@ function renderDetail(m) {
     });
   }
   $('#backToList').onclick=()=>{$('.app-shell').classList.remove('reading-open');$('.app-shell').classList.remove('sidebar-collapsed');};
-  $('#retryAction')?.addEventListener('click',()=>{dialog('重试收集',`<p>${['bilibili','youtube','douyin'].includes(m.platform)?'重新获取平台字幕，没有字幕时自动转写音频。':'重新读取正文、图片和可辨认的部分回复。'}旧原文与批注保留。</p><button id="doRetry" class="primary">开始重试</button>`);$('#doRetry').onclick=busy($('#doRetry'),async()=>{await api(`/materials/${selected}/retry`,'POST',{transcribe:true});$('#dialog').close();await select(selected,true);});});
+  $('#retryAction')?.addEventListener('click',busy($('#retryAction'),async()=>{const id=m.id;if(selected!==id)return;if(dirty)await saveNotes();if(selected!==id||dirty)throw Error('材料或批注已改变，请重新重试');const r=await api(`/materials/${id}/retry`,'POST',{transcribe:true});toast(r.kind==='images'?'图片补存已排队，原文和批注保留':'重试已排队；遇到验证会暂停');if(selected===id&&!dirty)await select(id,true);else await refresh();}));
+  $('#verifyAccountAction')?.addEventListener('click',guard(()=>favoritesDialog(m.platform,m.url)));
   $('#pushAction').onclick=guard(async()=>{if(dirty)await saveNotes();await pushDialog();});
   $('#refreshContent').onclick=busy($('#refreshContent'),async()=>{if(dirty)await saveNotes();await api(`/materials/${selected}/retry`,'POST',{refresh:true});toast('已排队重新采集，旧原文与理解继续保留。');await select(selected,true);});
   $('#versionsAction').onclick=guard(async()=>{const versions=await api(`/materials/${selected}/versions`);dialog('历史原文',versions.map(v=>{const c=JSON.parse(v.content_json);return `<details class="capability"><summary>${new Date(v.created).toLocaleString('zh-CN')} · ${escape(c.content.source)}</summary><pre class="preview">${escape(JSON.stringify(c,null,2))}</pre></details>`;}).join(''));});
@@ -652,7 +654,7 @@ async function previewExport(destination,complete){
 }
 $('#addBtn').onclick=()=>materialDialog();
 $('#organizePromptBtn').onclick=guard(()=>KnowledgeUI.showOrganizationPrompt());
-async function favoritesDialog(platform=$('#platformFilter').value||'x'){
+async function favoritesDialog(platform=$('#platformFilter').value||'x',verificationURL=''){
   if(dirty){toast('请先保存当前批注，再导入收藏。',true);return;}
   const run=++xDialogRun;
   const accounts=await api('/accounts');
@@ -671,7 +673,7 @@ async function favoritesDialog(platform=$('#platformFilter').value||'x'){
     <details class="connection-risk"><summary>平台限制与账号风险</summary><p>网页读取和第三方提取可能不符合平台条款，也可能触发验证、限流或账号限制；低频读取不能保证零封号风险。工具仅读取，不点赞、不发帖、不改变收藏；遇到验证、权限拒绝或限流就停止，不自动绕过。X 官方规则限制非 API 自动化；本轮按你的选择使用登录会话读取，每次请求间隔 8–12 秒；仍存在账号限制风险。YouTube 条款也限制自动化访问与下载，使用前应核对自己具备的权限。</p><p>每页先保存再继续。只有平台明确返回末尾才显示完整；读不到末尾会显示未完成，已导入材料仍保留。登录态按平台用 Windows DPAPI 加密，不发给 AI。</p><div class="button-row"><button id="forgetAccount">删除此平台本机登录状态</button></div></details>
     <details><summary>已有收藏列表链接或导出文件</summary><p class="muted">可以直接读取 B站收藏夹 / YouTube 播放列表；其他平台也可导入每行一个链接的 TXT，或含 url、origin、text 的 JSON。这个入口不要求安装浏览器插件。</p><input id="listUrl" type="url" placeholder="B站 fid= / YouTube list= 链接"><button id="readList">读取指定收藏列表</button><label for="favoriteFile">收藏清单文件</label><input id="favoriteFile" type="file" accept=".txt,.json"><textarea id="favoriteLinks" placeholder="每行一个收藏链接，或 JSON 数组"></textarea><button id="readFile">导入收藏清单</button></details>`);
   document.querySelectorAll('[data-favorite-platform]').forEach(b=>b.onclick=guard(()=>favoritesDialog(b.dataset.favoritePlatform)));
-  const login=async action=>{account=await api(`/accounts/${platform}/login`,'POST',{action});$('#loginState').textContent=account.login.message||account.verification;};
+  const login=async action=>{account=await api(`/accounts/${platform}/login`,'POST',{action,...(action==='open'&&verificationURL?{url:verificationURL}:{})});$('#loginState').textContent=account.login.message||account.verification;};
   $('#saveXClient')?.addEventListener('click',busy($('#saveXClient'),async()=>{await api('/accounts/x/client','PUT',{client_id:$('#xClientId').value.trim()});toast('Client ID 已保存，接下来打开官方授权页面。');}));
   $('#openLogin').onclick=busy($('#openLogin'),()=>login('open'));
   $('#saveLogin').onclick=busy($('#saveLogin'),()=>login('save'));
@@ -695,10 +697,10 @@ async function favoritesDialog(platform=$('#platformFilter').value||'x'){
     $('#loginState').textContent=updated.login.message||updated.verification;
     $('#saveLogin').disabled=updated.login.state!=='open';
     if(updated.login.state==='saved'&&account.login.state!=='saved'&&platform!=='x')$('#favoritePage').value=updated.favorite_url;
-    account=updated;$('#importFavorites').disabled=!updated.saved;
+    account=updated;$('#importFavorites').disabled=!updated.saved||updated.access_required;
     if(updated.last_sync?.id)tracked=updated.last_sync.id;
     const j=jobs.find(j=>j.id===tracked)||(updated.last_sync?.id===tracked?updated.last_sync:null);
-    if(j){const p=j.progress||{}, active=['queued','running'].includes(j.state);$('#stopFavorites').disabled=!active;$('#resumeFavorites').disabled=active||Boolean(p.complete);$('#importFavorites').disabled=active||!updated.saved;
+    if(j){const p=j.progress||{}, active=['queued','running'].includes(j.state);$('#stopFavorites').disabled=!active;$('#resumeFavorites').disabled=active||Boolean(p.complete)||updated.access_required;$('#importFavorites').disabled=active||!updated.saved||updated.access_required;
       $('#favoritesProgress').textContent=`${({queued:'等待读取',running:'正在读取收藏',done:p.complete?'收藏列表读取完成':'本批读取结束，尚未确认末尾',failed:'读取中断，已保存结果',paused:'读取已暂停'})[j.state]||j.state}\n新增 ${p.new||0} 条 · 重复 ${p.duplicates||0} 条${p.retired?' · 已删除跳过 '+p.retired+' 条':''}${p.updated_content?' · 原帖更新 '+p.updated_content+' 条':''}${p.repair_queued?' · 补采排队 '+p.repair_queued+' 条':''}${p.unavailable?' · 其中失效 '+p.unavailable+' 条':''}${p.pages?' · 已读取 '+p.pages+' 页':''}\n${p.transport==='heybox_favorites_api'?'收藏接口 · 分页位置 '+(p.checkpoint?.offset||0)+'\n':p.transport==='heybox_compatibility_page'?'收藏页兼容模式 · 未确认完整\n':''}${p.scope||''}\n${p.message||''}\n${['bilibili','youtube','douyin'].includes(platform)?'视频字幕在后台分别处理；列表读取结束不代表所有字幕已完成。':'链接先登记，正文、图片和部分回复在后台采集；列表读完不代表内容已全部成功。'}${j.error?'\n'+j.error:''}`;}
     setTimeout(()=>guard(watch)(),2500);
   };
@@ -743,6 +745,7 @@ $('#multiSelectBtn').onclick=guard(async()=>{
 });
 $('#selectAll').onchange=()=>chooseAllMaterials($('#selectAll').checked);
 $('#batchTrashBtn').onclick=guard(()=>runMaterialBatch('trash'));
+$('#batchRetryBtn').onclick=guard(()=>runMaterialBatch('retry'));
 $('#batchRestoreBtn').onclick=guard(()=>runMaterialBatch('restore'));
 $('#batchPurgeBtn').onclick=previewBatchPurge;
 $('#batchPurgeText').oninput=renderSelectionControls;

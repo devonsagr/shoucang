@@ -53,3 +53,64 @@ def test_comment_limit_includes_loaded_child_replies():
     html='<div id="page-bbs-link"><div class="hb-bbs-link__content"><div class="post__content">实际正文，单独保存。</div></div><div class="link-comment__list">'+card*10+'</div></div>'
     result=heybox.parse(html,'https://www.xiaoheihe.cn/app/bbs/link/12345','夹具')
     assert len(result['content']['comments'])==20
+
+def test_unloaded_image_never_becomes_the_source_page_url_or_a_complete_capture():
+    html='<div id="page-bbs-link"><div class="hb-bbs-link__content"><div class="post__content"><p>原文前段。</p><img class="img-item" src=""><p>原文后段。</p></div></div></div>'
+    r=heybox.parse(html,URL,'懒加载夹具')
+    assert URL not in r['body'] and '图片尚未加载' in r['body']
+    assert r['collection']=='partial' and r['content']['missing_image_count']==1 and not r['content']['original_text_complete']
+
+@pytest.mark.parametrize('inside',[False,True])
+def test_empty_comment_gallery_is_counted_once_inside_or_next_to_the_comment_text(inside):
+    image='<div class="comment-item__image-box"><img src=""></div>'
+    text='<div class="comment-item__content-container">已加载评论文字。'+(image if inside else '')+'</div>'
+    comment='<div class="link-comment__comment-item">'+text+('' if inside else image)+'</div>'
+    html='<div id="page-bbs-link"><div class="hb-bbs-link__content"><div class="post__content">完整作者正文应单独保留。</div></div><div class="link-comment__list">'+comment+'</div></div>'
+    result=heybox.parse(html,URL,'评论图集夹具')
+    assert result['collection']=='partial' and result['content']['missing_image_count']==1
+    assert result['content']['original_text_complete'] is True
+    assert result['content']['comments'][0]['body'].count('[图片尚未加载]')==1
+    assert URL not in result['content']['comments'][0]['body']
+
+@pytest.mark.parametrize('challenge',[False,True])
+@pytest.mark.parametrize('collapsed',[False,True])
+@pytest.mark.parametrize('comments',[False,True])
+def test_native_lazy_loading_scrolls_empty_images_and_stops_at_verification(challenge,collapsed,comments):
+    from app.platform_browser import PlatformAccessRequired
+    class Image:
+        def __init__(self):self.src='';self.scrolled=False
+        def get_attribute(self,key):return self.src if key=='src' else None
+        def is_visible(self):return not collapsed
+        def locator(self,selector):
+            from types import SimpleNamespace
+            assert selector=='xpath=..'
+            return SimpleNamespace(is_visible=lambda:True,scroll_into_view_if_needed=self.scroll_into_view_if_needed)
+        def scroll_into_view_if_needed(self,**kw):self.scrolled=True
+    class Images:
+        def __init__(self,values):self.values=values
+        def count(self):return len(self.values)
+        def nth(self,i):return self.values[i]
+    class Page:
+        blocked=False
+        def __init__(self):self.images=[Image(),Image()]
+        def locator(self,selector):
+            if selector=='.link-comment__list > .link-comment__comment-item':
+                from types import SimpleNamespace
+                def images(selector):
+                    assert '.comment-item__image-box img' in selector
+                    return Images(self.images)
+                return Images([SimpleNamespace(locator=images)] if comments else [])
+            return Images([] if comments else self.images)
+        def wait_for_timeout(self,ms):
+            for image in self.images:
+                if image.scrolled:image.src='https://cdn.example.org/loaded.png'
+            self.blocked=challenge
+    page=Page()
+    def check(page):
+        if page.blocked:raise PlatformAccessRequired('本人验证')
+    if challenge:
+        with pytest.raises(PlatformAccessRequired):heybox.hydrate_images(page,check)
+        assert page.images[0].scrolled and not page.images[1].scrolled
+    else:
+        heybox.hydrate_images(page,check)
+        assert all(i.scrolled and i.src for i in page.images)

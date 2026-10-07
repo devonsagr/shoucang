@@ -176,10 +176,9 @@ def heybox_favorites(url,record,progress,cancelled):
     from playwright.sync_api import sync_playwright
     from .heybox_api import Feed,PATH
     with sync_playwright() as pw:
-        b=sessions.browser(pw)
-        try:
-            context=b.new_context(storage_state=sessions.load('heybox'));guarded(context,block_media=True)
-            page=context.new_page();feed=Feed();page.on('response',feed.response)
+        with sessions.capture_session(pw,'heybox') as (context,page):
+            guarded(page,block_media=True)
+            feed=Feed();page.on('response',feed.response)
             page.goto(url,wait_until='domcontentloaded',timeout=60000);page.wait_for_timeout(2500)
             seen=set(progress.get('seen_urls',[]));observed=set();stalled=0;api_pages=0;fallback=False
             budget=max(180,int(progress.get('pages',0))+180)
@@ -243,7 +242,6 @@ def heybox_favorites(url,record,progress,cancelled):
                     page.locator('body').evaluate('(root)=>{for(const n of root.querySelectorAll("main,section,div")){const s=getComputedStyle(n);if(["auto","scroll"].includes(s.overflowY)&&n.scrollHeight>n.clientHeight+100&&n.clientHeight>200){n.scrollTop+=Math.max(n.clientHeight*.8,500);return}}}')
                 page.wait_for_timeout(6000)
             raise ValueError('本批收藏接口分页达到上限，已保存断点；未确认全部读取完成')
-        finally:b.close()
 
 def bili_favorites(record, progress, cancelled):
     nav = adapters.bili_api('/x/web-interface/nav', {})
@@ -277,10 +275,9 @@ def text_material(url, folder):
     from playwright.sync_api import sync_playwright
     kind = adapters.platform(url); safe_page(kind, url)
     with sync_playwright() as pw:
-        b = sessions.browser(pw)
-        try:
-            context = b.new_context(storage_state=sessions.load(kind)); guarded(context,block_media=True)
-            page = context.new_page(); page.goto(url, wait_until='domcontentloaded', timeout=60000)
+        with sessions.capture_session(pw,kind) as (context,page):
+            guarded(page,block_media=True)
+            page.goto(url, wait_until='domcontentloaded', timeout=60000)
             page.wait_for_timeout(2500); blocked(page)
             if kind=='heybox':
                 from . import heybox
@@ -288,6 +285,9 @@ def text_material(url, folder):
                 except Exception:
                     blocked(page)
                     raise ValueError('未取得小黑盒正文；页面加载或访问未完成，标题不算成功') from None
+                blocked(page)
+                from .video_pipeline import PROGRESS
+                heybox.hydrate_images(page,blocked,PROGRESS.get())
                 blocked(page)
                 raw=page.content();(folder/'original.html').write_text(raw,'utf-8')
                 return heybox.parse(raw,page.url,page.title().split(' - ')[0])
@@ -318,9 +318,9 @@ def text_material(url, folder):
             partial = bool(re.search(r'展开全文|登录后查看全文|阅读全文', body))
             return {'title':title, 'body':body, 'collection':'partial' if partial else 'ready',
                     'content':{'source':'官方网页可辨认的帖子正文与图片（本机浏览器）','resolved_url':page.url,
+                               'original_text_complete':not partial,
                                'comments':comments, 'comments_status':f'只读取页面当前已加载的前 {len(comments)} 条可辨认评论，未读取全部评论。',
                                'warning':'只保存实际可见的图文；视频留在原链接。展开/隐藏内容和评论范围请对照原页核查。'}}
-        finally: b.close()
 
 def douyin_info(url):
     """Read metadata/media actually returned to the official page, without signature generation."""

@@ -320,7 +320,7 @@ def purge(mid, revision, confirmation):
 
 def batch_materials(action, items, confirmation=None):
     """Freeze explicit targets; commit each existing file/DB operation independently."""
-    if action not in ('trash','restore','purge'):raise ValueError('未知批量操作')
+    if action not in ('trash','restore','purge','retry'):raise ValueError('未知批量操作')
     if not 1 <= len(items) <= 100:raise ValueError('每次请求需包含1到100条材料')
     ids=[item['id'] for item in items]
     if len(set(ids)) != len(ids):raise ValueError('同一批次不能重复选择材料')
@@ -333,6 +333,10 @@ def batch_materials(action, items, confirmation=None):
     for item in items:
         mid=item['id'];attempt_started=now()
         try:
+            if action=='retry':
+                from .service import retry_capture
+                result=retry_capture(mid,revision=item['revision'])
+                results.append({'id':mid,'ok':True,**result});continue
             result=purge(mid,item['revision'],confirmation) if action=='purge' else trash(mid,restore=action=='restore',revision=item['revision'])
             results.append({'id':mid,'ok':True,**({'purged':True} if action=='purge' else {'revision':result['revision'],'trashed':bool(result['trashed'])})})
         except Exception as exc:
@@ -340,7 +344,7 @@ def batch_materials(action, items, confirmation=None):
             committed=False
             try:
                 with db() as c:
-                    kind={'trash':'material_trashed','restore':'material_restored','purge':'material_purged'}[action]
+                    kind={'trash':'material_trashed','restore':'material_restored','purge':'material_purged'}.get(action,'capture_retry_requested')
                     proof=c.execute("SELECT 1 FROM events WHERE kind=? AND created>=? AND (material_id=? OR json_extract(detail,'$.id')=?) LIMIT 1",(kind,attempt_started,mid,mid)).fetchone()
                     row=c.execute('SELECT revision,trashed FROM '+table_for(mid)+' WHERE id=?',(mid,)).fetchone()
                     committed=bool(proof and (not row if action=='purge' else row and row['revision']>item['revision'] and bool(row['trashed'])==(action=='trash')))
