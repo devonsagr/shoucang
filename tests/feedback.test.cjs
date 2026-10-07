@@ -1,0 +1,11 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const app=fs.readFileSync('web/app.js','utf8'),source=app.slice(app.indexOf('let toastTimer;'),app.indexOf('function captureLabel('));
+const nodes={'#toast':{hidden:true,append(b){this.button=b;}},'#dialogFeedback':{hidden:true,append(b){this.button=b;}},'#dialog':{open:false}};
+let expire;
+const context={$:s=>nodes[s],document:{createElement:()=>({})},guard:fn=>fn,setTimeout:fn=>{expire=fn;return 1;},clearTimeout:()=>{}};
+vm.createContext(context);vm.runInContext(source,context);
+context.toast('已保存到调用资料');assert(!nodes['#toast'].hidden&&nodes['#dialogFeedback'].hidden);assert(!nodes['#toast'].button);
+nodes['#dialog'].open=true;context.toast('文件在 Obsidian 中已被修改',true);
+assert(nodes['#toast'].hidden&&!nodes['#dialogFeedback'].hidden);assert.equal(nodes['#dialogFeedback'].className,'error');
+assert(nodes['#dialogFeedback'].textContent.includes('已被修改'));expire();assert(nodes['#dialogFeedback'].hidden);
+console.log('Feedback: normal status in its own row, dialog errors inside the dialog and no blocking save action passed');

@@ -1,0 +1,12 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const src=fs.readFileSync('web/app.js','utf8');
+const fn=src.slice(src.indexOf('function renderReadingPreview('),src.indexOf('function renderDetail('));
+const c={escape:s=>String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;'),icon:()=>'<svg></svg>'};
+vm.createContext(c);vm.runInContext(fn,c);
+assert.equal(c.renderReadingPreview({}), '');
+assert.equal(c.renderReadingPreview({reading_preview:{reading_only:false,model_used:false,text:'not allowed'}}),'');
+assert.equal(c.renderReadingPreview({reading_preview:{reading_only:true,model_used:true,text:'wrong model label'}}),'');
+const html=c.renderReadingPreview({reading_preview:{reading_only:true,model_used:false,source:'原文摘录',text:'<script>bad</script>\n原作者第二句'}});
+assert(html.includes('原文摘录')&&html.includes('速览')&&html.includes('&lt;script&gt;')&&!html.includes('<script>'));
+assert(!html.includes('AI 总结'));
+console.log('Reading preview: original-only rendering, explicit extractive label, empty/model guards and HTML escaping passed');

@@ -1,0 +1,16 @@
+data/
+tmp/
+.venv/
+.pytest_cache/
+__pycache__/
+*.pyc
+*.log
+config.json
+config.tmp
+.env
+.env.*
+*.sqlite3
+*.sqlite3-*
+*.dpapi
+docs/design/
+CODEX_HISTORY.md

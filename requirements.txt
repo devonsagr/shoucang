@@ -1,0 +1,14 @@
+fastapi>=0.115,<1
+uvicorn>=0.34,<1
+httpx>=0.28,<1
+yt-dlp[default]>=2025.9.26
+trafilatura>=2,<3
+beautifulsoup4>=4.13,<5
+lxml_html_clean>=0.4
+twikit==2.3.3
+twitter-cli==0.8.5
+faster-whisper>=1.1,<2
+playwright>=1.55,<2
+imageio-ffmpeg>=0.6,<1
+sentencepiece==0.2.1
+pytest>=8,<10

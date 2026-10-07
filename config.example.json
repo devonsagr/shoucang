@@ -1,0 +1,29 @@
+{
+  "ai_base_url": "https://api.openai.com/v1",
+  "ai_model": "",
+  "ai_api_key": "",
+  "firecrawl_base_url": "https://api.firecrawl.dev",
+  "firecrawl_api_key": "",
+  "whisper_model": "turbo",
+  "whisper_device": "auto",
+  "obsidian_vault": "",
+  "knowledge_paths": {
+    "archive": "收藏处理器",
+    "callable": "收藏材料库/01_调用资料",
+    "digest": "收藏材料库/02_消化暂存",
+    "trash": "收藏材料库/_回收站",
+    "materials": "材料"
+  },
+  "knowledge_targets": [],
+  "subtitle_languages": [
+    "zh-Hans",
+    "zh-CN",
+    "zh",
+    "en"
+  ],
+  "cookies": {},
+  "x_client_id": "",
+  "x_read_mode": "session",
+  "x_read_backend": "twitter-cli",
+  "x_legacy_read_enabled": false
+}
