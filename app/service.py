@@ -11,6 +11,19 @@ from . import adapters, assets, bilingual, knowledge, obsidian, store, topics, x
 
 STOP = threading.Event()
 
+def remember_favorite_folder(c,mid,folder):
+    if not isinstance(folder,dict):return
+    identifier=str(folder.get('id',''));title=str(folder.get('title','')).strip()
+    if not identifier.isdigit() or not title or len(title)>300:raise ValueError('收藏夹信息无效')
+    row=c.execute('SELECT content_json FROM materials WHERE id=?',(mid,)).fetchone()
+    content=json.loads(row['content_json']);folders=content.get('favorite_folders',[])
+    new=[{'id':identifier,'title':title} if str(value.get('id'))==identifier else value for value in folders]
+    if not any(str(value.get('id'))==identifier for value in folders):new.append({'id':identifier,'title':title})
+    if new==folders:return
+    content['favorite_folders']=new
+    c.execute('UPDATE materials SET content_json=?,revision=revision+1 WHERE id=?',(store.dumps(content),mid))
+    store.event(c,mid,'favorite_folder_seen',{'id':identifier,'title':title})
+
 def add(payload, source='用户明确提供', *, enqueue_collect=True, retry_incomplete=False,allow_deleted=False):
     url = payload['url'].strip()
     key = adapters.canonical(url)
@@ -44,6 +57,7 @@ def add(payload, source='用户明确提供', *, enqueue_collect=True, retry_inc
                 if retry_incomplete or supplied: raise ValueError('这个链接在回收站中；请先恢复材料，原文和理解仍保留')
                 store.event(c,mid,'duplicate_ignored_in_trash',{'source':source,'url':url})
                 return {'id':mid,'duplicate':True,'trashed':True}
+            if adapters.platform(key)=='bilibili':remember_favorite_folder(c,mid,payload.get('favorite_folder'))
             store.event(c, mid, 'duplicate_seen', {'url': url, 'origin': origin, 'source': source})
             # A later favorite observation upgrades the primary label, with history retained.
             if origin == 'favorite' and existing['origin'] != 'favorite':
@@ -64,6 +78,7 @@ def add(payload, source='用户明确提供', *, enqueue_collect=True, retry_inc
             mid = store.uid()
             c.execute('INSERT INTO materials(id,canonical,url,platform,origin,title,created,updated) VALUES (?,?,?,?,?,?,?,?)',
                   (mid, key, url, adapters.platform(url), origin, payload.get('title') or url, store.now(), store.now()))
+            if adapters.platform(key)=='bilibili':remember_favorite_folder(c,mid,payload.get('favorite_folder'))
             store.event(c, mid, 'collected_reference', {'origin': origin, 'source': source, 'url': url})
             if not supplied:
                 if payload.get('body'):write_content(c,mid,payload)
@@ -83,6 +98,8 @@ def add(payload, source='用户明确提供', *, enqueue_collect=True, retry_inc
 def write_content(c, mid, result, preserve_processing=False):
     previous=c.execute('SELECT content_json FROM materials WHERE id=?',(mid,)).fetchone()
     saved=json.loads(previous['content_json']) if previous else {}
+    if saved.get('favorite_folders'):
+        result={**result,'content':{**result['content'],'favorite_folders':saved['favorite_folders']}}
     if saved.get('annotations'):
         result={**result,'content':{**result['content'],'annotations':saved['annotations']}}
     if saved.get('knowledge_context'):
@@ -485,6 +502,7 @@ def sync_platform(job, payload):
     def cancelled():
         with store.db() as c: row=c.execute('SELECT payload FROM jobs WHERE id=?',(job['id'],)).fetchone()
         return STOP.is_set() or bool(json.loads(row['payload']).get('stop'))
+    if kind=='bilibili':progress['folder_ids']=payload.get('folder_ids')
     iterator = platform_browser.favorites(kind,payload['url'],record,progress,cancelled)
     try:
         for _ in iterator:
@@ -571,7 +589,7 @@ def worker(favorites_only=False):
                         store.event(c,None,'platform_capture_paused',{'platform':kind,'pending':len(pending),'reason':error})
         if job['material_id'] and job['kind']=='collect':
             with store.db() as c:kind=c.execute('SELECT platform FROM materials WHERE id=?',(job['material_id'],)).fetchone()
-            if kind and kind[0]=='heybox':STOP.wait(3)
+            if kind and kind[0]=='heybox':STOP.wait(1)
 
 def favorites_worker():
     worker(favorites_only=True)

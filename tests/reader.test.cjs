@@ -27,7 +27,7 @@ assert(separated.indexOf('这段文字')<separated.lastIndexOf('<figure'));
 assert.equal(context.imageCaption('帖子图片 2'),'');
 assert.equal(context.imageCaption('不同年份的录音室照片'),'不同年份的录音室照片');
 const commentThumbnail=context.richContent('回复正文\n\n![图解](images/a.png)',groupMaterial,'comment:0');
-assert(commentThumbnail.includes('media-group multiple')&&commentThumbnail.includes('data-image-count="1"'));
+assert(commentThumbnail.includes('comment-gallery')&&commentThumbnail.includes('data-image-count="1"'));
 console.log('Reader checks passed: image order, local route, HTML escaping, URL safety, remote/path protection');
 
 context.bilingualVisible=true;
@@ -62,3 +62,12 @@ async function checkBilingualSwitch(){
   console.log('Bilingual switch covers body and replies, preserves player/draft/anchor and deduplicates queued translation');
 }
 checkBilingualSwitch().catch(error=>{console.error(error);process.exitCode=1;});
+
+const tutorial={...groupMaterial,platform:'heybox',content:{...groupMaterial.content,media_kind:'article',gallery_count:0}};
+const tutorialHtml=context.richContent('![截图](images/a.png)\n\n![截图](images/b.png)',tutorial);
+assert(tutorialHtml.includes('article-images')&&!tutorialHtml.includes('heybox-gallery'));
+assert(tutorialHtml.includes('data-image-src=')&&!tutorialHtml.includes('target="_blank"'));
+assert(context.richContent('![图片](images/a.png)',{...tutorial,content:{...tutorial.content,media_kind:'gallery_post'}}).includes('heybox-gallery'));
+assert(context.richContent('![图片](images/a.png)',{...tutorial,platform:'x',content:groupMaterial.content}).includes('x-photos'));
+assert(context.richContent('![图片](images/a.png)',{...tutorial,platform:'xiaohongshu',content:groupMaterial.content}).includes('note-gallery'));
+console.log('Semantic article, Heybox gallery, X photos and note layouts are distinct; images open in-place');

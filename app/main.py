@@ -10,7 +10,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from . import adapters, assets, bilingual, first_layer, knowledge, obsidian, playback, reading_preview, service, store, topics, vault_files, xbookmarks, sessions, platform_browser, xofficial
+from . import chrome_bridge, adapters, assets, bilingual, first_layer, knowledge, obsidian, playback, reading_preview, service, store, topics, vault_files, xbookmarks, sessions, platform_browser, xofficial
 
 @asynccontextmanager
 async def lifespan(app):
@@ -26,7 +26,7 @@ async def lifespan(app):
     thread.join(timeout=2)
     favorite_thread.join(timeout=2)
 
-app = FastAPI(title='藏页 · 多平台收藏与批注', version='0.5.5', lifespan=lifespan, docs_url=None, redoc_url=None)
+app = FastAPI(title='藏页 · 多平台收藏与批注', version='0.5.6', lifespan=lifespan, docs_url=None, redoc_url=None)
 
 @app.get('/design/v6/reference-{variant}.png')
 def new_design_reference(variant: Literal['a','b','c','d','e','f','g']):
@@ -63,7 +63,9 @@ def storage_locations():
             'vault':vault,
             'knowledge_paths':obsidian.paths(),
             'vault_layout':f'第一层：{layout["callable"]} 或 {layout["digest"]}/<标题--导出ID>/index.md，图片在同条assets。第二层：<主题目录>/{layout["materials"]}/可调用资料或待消化/<标题--导出ID>/index.md，同条来源与批注.md和assets。原始材料单独导出：{layout["archive"]}/<平台>/<状态>/<单条目录>。回收站：{layout["trash"]}。换层、删除与恢复按文件归属联动。',
-            'notice':'两种批注去向各有独立第一层记录，与新收藏分开。首次保存不运行AI；所有小库写入先预览确认，已确认快照不自动移动或覆盖。'}
+            'destinations':[{'label':'留作资料','path':str(Path(vault)/layout['callable'])},{'label':'以后细读','path':str(Path(vault)/layout['digest'])},{'label':'材料回收站','path':str(Path(vault)/layout['trash'])}],
+            'library_root':vault,'topic_subfolder':layout['materials'],
+            'notice':'原始材料留在本机。你确认保存后，原文和批注一起进入下面的资料文件夹。'}
 
 @app.post('/api/obsidian/structure')
 def create_vault_structure():
@@ -81,13 +83,20 @@ async def local_only(request: Request, call_next):
     host = request.headers.get('host', '').split(':')[0]
     if host not in ('127.0.0.1', 'localhost', 'testserver'):
         return JSONResponse({'detail': '仅允许本机访问'}, 403)
+    bridge=request.url.path=='/api/accounts/browser-connect'
+    origin=request.headers.get('origin')
+    if bridge and origin and not chrome_bridge.extension_origin(origin):
+        return JSONResponse({'detail':'仅接受本人连接的Chrome扩展'},403)
+    if bridge and request.method=='OPTIONS':
+        if not chrome_bridge.extension_origin(origin):return JSONResponse({'detail':'扩展来源无效'},403)
+        return Response(status_code=204,headers={'Access-Control-Allow-Origin':origin,'Access-Control-Allow-Methods':'POST','Access-Control-Allow-Headers':'Content-Type,X-Local-Request','Vary':'Origin'})
     if request.method not in ('GET', 'HEAD', 'OPTIONS'):
-        origin = request.headers.get('origin')
-        if (origin and origin != str(request.base_url).rstrip('/')) or request.headers.get('x-local-request') != '1':
+        if (origin and origin != str(request.base_url).rstrip('/') and not (bridge and chrome_bridge.extension_origin(origin))) or request.headers.get('x-local-request') != '1':
             return JSONResponse({'detail': '仅接受本机界面或显式 API 请求'}, 403)
         if int(request.headers.get('content-length', '0')) > 5_000_000:
             return JSONResponse({'detail': '请求超过 5MB'}, 413)
     response = await call_next(request)
+    if bridge and origin:response.headers['Access-Control-Allow-Origin']=origin;response.headers['Vary']='Origin'
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self' https://www.youtube.com/iframe_api https://www.youtube.com/s/player/; style-src 'self'; img-src 'self' data:; connect-src 'self'; media-src 'self'; frame-src https://www.youtube.com https://player.bilibili.com https://open.douyin.com; frame-ancestors 'none'; base-uri 'none'"
     return response
@@ -118,7 +127,7 @@ def health():
 def capabilities():
     return [{'id':key,'name':name,'favorites':'网页登录后通过专用收藏接口读取自己的清单，offset分页；断点与稳定ID去重' if key=='heybox' else '官方网页登录后读取自己的收藏页；逐页保存、去重，可停止或继续',
              'content':'自动平台字幕 → 本机音频转写，逐段时间轴' if key in ('bilibili','youtube','douyin') else '正文与对应图片、已加载的部分评论；视频仅留原链接',
-             'status':'B站遍历全部自建收藏夹；其他平台按实际可访问收藏页读取。页面结构与账号权限需现场验证，未到末尾不标成全部成功。'}
+             'status':'B站先选择当前账号自建的收藏夹；其他平台按实际可访问收藏页读取。页面结构与账号权限需现场验证，未到末尾不标成全部成功。'}
             for key,(name,_) in adapters.PLATFORMS.items()]
 
 @app.get('/api/accounts')
@@ -131,6 +140,22 @@ class LoginInput(BaseModel):
 
 class BrowserSessionInput(BaseModel):
     state: dict
+
+class ChromeConnectInput(BaseModel):
+    platform: Literal['bilibili','youtube','douyin','x','heybox','xiaohongshu']
+    token: str = Field(min_length=32,max_length=32)
+    state: dict
+
+@app.post('/api/accounts/{kind}/connect')
+def chrome_connect_code(kind:str,request:Request):
+    result=chrome_bridge.issue(kind,request.url.port or 8766)
+    return JSONResponse(result,headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer'})
+
+@app.post('/api/accounts/browser-connect')
+def chrome_connect_import(body:ChromeConnectInput):
+    result=chrome_bridge.accept(body.token,body.platform,body.state)
+    return JSONResponse(result,headers={'Cache-Control':'no-store'})
+
 
 @app.get('/api/browser-extension')
 def browser_extension():
@@ -189,11 +214,20 @@ class FavoritesInput(BaseModel):
     url: str = Field(default='',max_length=4000)
     resume_job_id: str | None = None
     repair_incomplete: bool=False
+    folder_ids: list[str] | None = Field(default=None,max_length=1000)
+
+@app.get('/api/accounts/bilibili/folders')
+def list_bili_folders():
+    _,folders=platform_browser.bili_folders()
+    return {'folders':folders,'scope':'当前账号自建的收藏夹'}
 
 @app.post('/api/favorites')
 def favorites(body: FavoritesInput):
     kind=body.platform
-    if not sessions.path(kind).exists(): raise ValueError('请先打开该平台官方登录窗口，完成登录并保存状态')
+    folders=body.folder_ids
+    if folders is not None and (kind!='bilibili' or not folders or len(set(folders))!=len(folders) or any(not value.isdigit() or len(value)>20 or int(value)<1 for value in folders)):
+        raise ValueError('请选择有效且不重复的B站收藏夹')
+    if not sessions.path(kind).exists(): raise ValueError('请先连接这个平台的Chrome登录状态')
     if sessions.requires_verification(kind):raise ValueError('平台需要本人验证；先在已有Chrome窗口处理并保存登录，再导入或续读')
     if kind=='x':
         if store.settings().get('x_read_mode','session')=='oauth':
@@ -216,8 +250,9 @@ def favorites(body: FavoritesInput):
             if not previous or json.loads(previous['payload']).get('platform')!=kind: raise ValueError('没有这个平台的可继续任务')
             progress=json.loads(previous['progress'])
             repair=json.loads(previous['payload']).get('repair_incomplete',False)
+            folders=json.loads(previous['payload']).get('folder_ids')
             if progress.get('complete'): raise ValueError('上次已读到末尾；请开始一次新的导入')
-        jid=store.enqueue(c,'favorites',{'platform':kind,'url':url,'repair_incomplete':repair,**({'resumed_from':body.resume_job_id} if body.resume_job_id else {})})
+        jid=store.enqueue(c,'favorites',{'platform':kind,'url':url,'repair_incomplete':repair,**({'folder_ids':folders} if kind=='bilibili' else {}),**({'resumed_from':body.resume_job_id} if body.resume_job_id else {})})
         c.execute('UPDATE jobs SET progress=? WHERE id=?',(store.dumps(progress),jid))
     cfg=store.settings(); cfg.setdefault('favorite_pages',{})[kind]=url; store.save_settings(cfg)
     return {'job_id':jid,'duplicate':False}
@@ -426,7 +461,9 @@ def image(mid: str, relative: str):
     item = store.get(mid)
     if not any(a.get('path') == relative and a['status'] == 'saved' for a in item['content'].get('media', [])):
         raise HTTPException(404, '此图片不属于当前材料')
-    return FileResponse(assets.image_path(mid, relative))
+    path=assets.image_path(mid,relative)
+    kind=assets.raster_type(path.read_bytes()[:32])
+    return FileResponse(path,media_type={'png':'image/png','jpg':'image/jpeg','gif':'image/gif','webp':'image/webp','avif':'image/avif'}[kind],headers={'Content-Disposition':'inline'})
 
 @app.get('/api/materials/{mid}/versions')
 def versions(mid: str):

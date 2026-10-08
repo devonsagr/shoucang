@@ -1,9 +1,23 @@
 {
   "manifest_version": 3,
-  "name": "藏页 · 登录快照",
-  "version": "0.5.5",
-  "description": "仅在你点击时导出所选平台的登录快照，用于本机收藏采集。",
-  "permissions": ["cookies", "downloads"],
-  "optional_host_permissions": ["https://*.bilibili.com/*", "https://*.youtube.com/*", "https://*.douyin.com/*", "https://*.iesdouyin.com/*", "https://*.x.com/*", "https://*.twitter.com/*", "https://*.xiaoheihe.cn/*", "https://*.xiaohongshu.com/*"],
-  "action": {"default_popup": "popup.html"}
+  "name": "藏页 · 连接当前Chrome",
+  "version": "0.5.6",
+  "description": "由你点击，将所选平台登录状态直接交给本机藏页，不生成Cookie文件。",
+  "permissions": [
+    "cookies"
+  ],
+  "optional_host_permissions": [
+    "https://*.bilibili.com/*",
+    "https://*.youtube.com/*",
+    "https://*.douyin.com/*",
+    "https://*.iesdouyin.com/*",
+    "https://*.x.com/*",
+    "https://*.twitter.com/*",
+    "https://*.xiaoheihe.cn/*",
+    "https://*.xiaohongshu.com/*",
+    "http://127.0.0.1/*"
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  }
 }

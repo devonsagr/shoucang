@@ -1,6 +1,8 @@
 """Archive raster images, retaining Markdown order and original source URLs."""
 from __future__ import annotations
 import re
+from contextlib import ExitStack
+from contextvars import ContextVar
 from pathlib import Path
 from urllib.parse import urljoin, unquote
 
@@ -9,6 +11,7 @@ from . import adapters, store
 
 IMAGE = re.compile(r'!\[([^\]\n]*)\]\(([^\s)]+)(?:\s+"[^"]*")?\)')
 FAILED_IMAGE = re.compile(r'\[图片未存档：([^\]\n]*)\]\(([^\s)]+)\)')
+IMAGE_CLIENT=ContextVar("image_client",default=None)
 MAX_IMAGES = 200
 MAX_CAPTURE_BYTES = 128_000_000
 
@@ -39,9 +42,11 @@ def raster_type(data):
 
 def download(url):
     # No platform cookies are sent to image hosts, including redirect destinations.
-    with httpx.Client(timeout=25, follow_redirects=False, headers={'User-Agent':'Mozilla/5.0'}) as client:
+    with ExitStack() as stack:
+        client=IMAGE_CLIENT.get() or stack.enter_context(httpx.Client(timeout=25,follow_redirects=False,headers={'User-Agent':'Mozilla/5.0'}))
         for _ in range(6):
             adapters.public_url(url)
+            client.cookies.clear()
             with client.stream('GET', url) as response:
                 if response.is_redirect:
                     url = str(response.url.join(response.headers['location']))
@@ -112,9 +117,12 @@ def localize(result, folder, mid, base_url):
             entry['error']=reason;failed[source]=entry
             return f'[图片未存档：{alt or "图片"}]({source})'
     content.setdefault('original_body', result['body'])
-    result['body'] = IMAGE.sub(replace, result['body'])
-    for comment in content.get('comments', []):
-        comment['body'] = IMAGE.sub(replace, comment.get('body', ''))
+    with httpx.Client(timeout=25,follow_redirects=False,headers={'User-Agent':'Mozilla/5.0'}) as client:
+        token=IMAGE_CLIENT.set(client)
+        try:
+            result['body']=IMAGE.sub(replace,result['body'])
+            for comment in content.get('comments',[]):comment['body']=IMAGE.sub(replace,comment.get('body',''))
+        finally:IMAGE_CLIENT.reset(token)
     if any(a['status'] != 'saved' for a in content['media']):
         content['warning'] = (content.get('warning', '') + ' 部分图片未能存档，请查看图片来源记录。').strip()
         result['collection'] = 'partial'

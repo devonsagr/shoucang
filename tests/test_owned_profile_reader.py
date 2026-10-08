@@ -10,7 +10,7 @@ def test_heybox_capture_reuses_owned_context_without_cloning_cookies_or_closing_
     context=SimpleNamespace(new_page=lambda:page)
     browser=SimpleNamespace(close=lambda:closed.append('connection'),new_context=lambda **kw:pytest.fail('不能克隆到新浏览器上下文'))
     monkeypatch.setattr(sessions,'browser',lambda _:pytest.fail('不能启动新的后台无头浏览器'))
-    monkeypatch.setattr(sessions,'login_browser',lambda pw,kind:(browser,context,landing))
+    monkeypatch.setattr(sessions,'login_browser',lambda pw,kind,**kw:(browser,context,landing))
     with sessions.capture_session(None,'heybox') as (actual,reader):
         assert actual is context and reader is page
     assert closed==['reader','connection']
@@ -27,7 +27,7 @@ def test_visible_heybox_verification_keeps_the_actual_reader_tab_for_human_resol
     page=SimpleNamespace(close=lambda:pytest.fail('不能关闭真正触发验证码的页面'),unroute=lambda pattern:cleanup.append(pattern))
     context=SimpleNamespace(new_page=lambda:page)
     browser=SimpleNamespace(close=lambda:cleanup.append('disconnect'))
-    monkeypatch.setattr(sessions,'login_browser',lambda *a:(browser,context,None))
+    monkeypatch.setattr(sessions,'login_browser',lambda *a,**kw:(browser,context,None))
     with pytest.raises(PlatformAccessRequired):
         with sessions.capture_session(None,'heybox'):raise PlatformAccessRequired('本人验证')
     assert cleanup==['**/*','disconnect']
@@ -36,7 +36,7 @@ def test_other_reader_failures_close_only_the_owned_tab(local,monkeypatch):
     cleanup=[]
     page=SimpleNamespace(close=lambda:cleanup.append('reader'))
     browser=SimpleNamespace(close=lambda:cleanup.append('disconnect'))
-    monkeypatch.setattr(sessions,'login_browser',lambda *a:(browser,SimpleNamespace(new_page=lambda:page),None))
+    monkeypatch.setattr(sessions,'login_browser',lambda *a,**kw:(browser,SimpleNamespace(new_page=lambda:page),None))
     with pytest.raises(ValueError,match='页面结构变化'):
         with sessions.capture_session(None,'heybox'):raise ValueError('页面结构变化')
     assert cleanup==['reader','disconnect']
@@ -52,7 +52,7 @@ def test_cleanup_failure_never_hides_platform_verification_or_its_pause_signal(l
         cleanup.append('disconnect')
         if fault in ('disconnect','both'):raise RuntimeError('连接已关闭')
     page=SimpleNamespace(close=lambda:pytest.fail('验证码标签必须保留'),unroute=lambda *a:clear())
-    monkeypatch.setattr(sessions,'login_browser',lambda *a:(SimpleNamespace(close=disconnect),SimpleNamespace(new_page=lambda:page),None))
+    monkeypatch.setattr(sessions,'login_browser',lambda *a,**kw:(SimpleNamespace(close=disconnect),SimpleNamespace(new_page=lambda:page),None))
     original=PlatformAccessRequired('平台要求本人验证')
     with pytest.raises(PlatformAccessRequired) as error:
         with sessions.capture_session(None,'heybox'):raise original
@@ -88,9 +88,10 @@ def test_verification_window_does_not_refresh_same_source_or_save_visible_challe
     browser=SimpleNamespace(close=lambda:pytest.fail('验证码未完成不能关闭窗口'))
     context=SimpleNamespace(storage_state=lambda:pytest.fail('可见验证不能保存为已通过'))
     def blocked(page):raise platform_browser.PlatformAccessRequired('请完成本人验证')
+    monkeypatch.setattr(sessions,'browser_executable',lambda:None)
     monkeypatch.setattr(sessions,'COMMANDS',SimpleNamespace(get=command))
     monkeypatch.setattr(sessions,'URLS',{'heybox':url})
-    monkeypatch.setattr(sessions,'login_browser',lambda *a:(browser,context,page))
+    monkeypatch.setattr(sessions,'login_browser',lambda *a,**kw:(browser,context,page))
     monkeypatch.setattr(platform_browser,'blocked',blocked)
     monkeypatch.setattr(playwright.sync_api,'sync_playwright',runtime)
     with pytest.raises(WorkerStopped):sessions.login_worker()

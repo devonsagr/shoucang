@@ -52,7 +52,7 @@ def favorites(kind, url, record, progress, cancelled=lambda:False):
     """Persist each visible page before scrolling. A stalled list is never 'complete'."""
     from playwright.sync_api import sync_playwright
     safe_page(kind, url)
-    if not sessions.path(kind).exists(): raise ValueError('请先通过官方网页登录并保存该平台登录状态')
+    if not sessions.path(kind).exists(): raise ValueError('请先连接或保存这个平台的Chrome登录状态')
     if kind=='x':
         if store.settings().get('x_read_mode','session')=='oauth':
             from . import xofficial
@@ -243,14 +243,31 @@ def heybox_favorites(url,record,progress,cancelled):
                 page.wait_for_timeout(6000)
             raise ValueError('本批收藏接口分页达到上限，已保存断点；未确认全部读取完成')
 
+def bili_folders():
+    nav=adapters.bili_api('/x/web-interface/nav',{})
+    if not nav.get('isLogin'):raise ValueError('B站登录已过期，请沿用当前Chrome账号重新连接')
+    account=str(nav['mid'])
+    data=adapters.bili_api('/x/v3/fav/folder/created/list-all',{'up_mid':account})
+    folders=[{'id':str(value['id']),'title':str(value.get('title','未命名收藏夹')),'count':int(value.get('media_count',0))} for value in data.get('list') or []]
+    return account,folders
+
 def bili_favorites(record, progress, cancelled):
-    nav = adapters.bili_api('/x/web-interface/nav', {})
-    if not nav.get('isLogin'): raise ValueError('B站登录已过期，请在官方窗口重新登录')
-    account = str(nav['mid'])
+    account,folders=bili_folders()
     if progress.get('account_id') and progress['account_id'] != account:
         raise ValueError('账号已变化，不能继续另一个账号的收藏任务；请开始一次新的导入')
     progress['account_id'] = account
-    folders = adapters.bili_api('/x/v3/fav/folder/created/list-all', {'up_mid':account}).get('list') or []
+    selected=progress.get('folder_ids')
+    previous=progress.get('selected_folders')
+    if previous:
+        frozen=[str(folder['id']) for folder in previous]
+        if selected is not None and set(selected)!=set(frozen):raise ValueError('续读的收藏夹范围已变化，请开始一次新的导入')
+        selected=frozen
+    if selected is not None:
+        by_id={folder['id']:folder for folder in folders}
+        if not selected or set(selected)-set(by_id):raise ValueError('所选收藏夹不存在或已不可访问，请重新选择')
+        # Checkpoint indices refer to this frozen order, not the next API listing order.
+        folders=[by_id[identifier] for identifier in selected]
+    progress['selected_folders']=[{'id':f['id'],'title':f['title']} for f in folders]
     checkpoint = progress.get('checkpoint', {})
     start_folder = checkpoint.get('folder', 0)
     for index, folder in enumerate(folders):
@@ -261,7 +278,7 @@ def bili_favorites(record, progress, cancelled):
             data = adapters.bili_api('/x/v3/fav/resource/list', {'media_id':folder['id'], 'pn':page, 'ps':20, 'platform':'web'})
             for entry in data.get('medias') or []:
                 if not entry.get('bvid'): raise ValueError('收藏中存在已失效或未支持的条目；已登记的材料保留，本次未完整完成')
-                record({'url':'https://www.bilibili.com/video/'+entry['bvid'], 'title':entry.get('title','')})
+                record({'url':'https://www.bilibili.com/video/'+entry['bvid'],'title':entry.get('title',''),'favorite_folder':{'id':folder['id'],'title':folder['title']}})
             checkpoint = {'folder':index, 'page':page+1} if data.get('has_more') else {'folder':index+1, 'page':1}
             progress.update(checkpoint=checkpoint, complete=False, message='正在读取收藏夹：'+folder.get('title',''))
             yield progress
@@ -278,10 +295,9 @@ def text_material(url, folder):
         with sessions.capture_session(pw,kind) as (context,page):
             guarded(page,block_media=True)
             page.goto(url, wait_until='domcontentloaded', timeout=60000)
-            page.wait_for_timeout(2500); blocked(page)
             if kind=='heybox':
                 from . import heybox
-                try:page.locator(','.join(heybox.BODY_SELECTORS)).first.wait_for(state='attached',timeout=12000)
+                try:page.wait_for_function(r'''()=>{const nodes=document.querySelectorAll('#page-bbs-link .post__content,#page-bbs-link .image-text__content,.article-content,.bbs-content,.post-content,.link-content');return [...nodes].some(n=>{const t=(n.innerText||'').trim();return n.querySelector('img,video')||t.length>=8&&!/^(?:正在加载|加载中|loading)[.。…\s]*$/i.test(t)})||!!document.querySelector('#page-bbs-link .hb-bbs-video,#page-bbs-link .header-image__container img')}''',timeout=12000,polling=100)
                 except Exception:
                     blocked(page)
                     raise ValueError('未取得小黑盒正文；页面加载或访问未完成，标题不算成功') from None
@@ -291,6 +307,7 @@ def text_material(url, folder):
                 blocked(page)
                 raw=page.content();(folder/'original.html').write_text(raw,'utf-8')
                 return heybox.parse(raw,page.url,page.title().split(' - ')[0])
+            page.wait_for_timeout(2500);blocked(page)
             selectors = {
                 'xiaohongshu':['#detail-desc', '.note-content', '.content .desc'],
                 'heybox':['.article-content', '.bbs-content', '.post-content', 'article', '.link-content'],

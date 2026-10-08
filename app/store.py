@@ -410,6 +410,8 @@ def markdown(item,include_processing=True):
             lines += [f'### {label} · {unit["language"]}', '', f'来源：{unit["source"]}', '', unit['text'], '']
     if not include_processing:return '\n'.join(lines)
     from . import knowledge
+    if content.get('favorite_folders'):
+        lines += ['- 收藏夹记录：'+ '、'.join(str(f.get('title','')).replace('\n',' ') for f in content['favorite_folders']),'']
     if content.get('annotations'):
         for track,text in content['annotations'].items():
             if track in ('callable','digest'):lines+=['## '+('调用批注' if track=='callable' else '消化批注'),'',text,'']

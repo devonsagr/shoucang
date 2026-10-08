@@ -62,4 +62,7 @@ def test_extension_download_is_code_only_and_requests_no_hosts_at_install(local)
         manifest=json.loads(archive.read('cangye-login/manifest.json'))
         assert not manifest.get('host_permissions') and not manifest.get('content_scripts') and not manifest.get('background')
         script=archive.read('cangye-login/popup.js').decode()
-        assert 'fetch(' not in script and 'chrome.cookies.getAll({domain})' in script and 'chrome.permissions.request' in script
+        assert manifest['permissions']==['cookies'] and 'downloads' not in manifest['permissions']
+        assert 'chrome.cookies.getAll({domain})' in script and 'chrome.permissions.request' in script
+        assert "base:'http://127.0.0.1:'" in script and "target.base+'/api/accounts/browser-connect'" in script
+        assert "credentials:'omit'" in script and 'chrome.downloads' not in script and 'chrome.storage' not in script

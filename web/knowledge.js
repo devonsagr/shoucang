@@ -73,7 +73,7 @@ const KnowledgeUI=(()=>{
   }
   async function showOrganizationPrompt(){
     const p=await api('/first-layer/organization-prompt');
-    dialog('整理提示词',`<label class="sr-only" for="organizationPrompt">第一层到主题材料区的完整提示词</label><textarea id="organizationPrompt" class="organization-prompt" readonly>${escape(p.text)}</textarea><div class="button-row"><button id="copyOrganizationPrompt" class="primary">复制提示词</button><span id="promptCopyState" role="status" aria-live="polite"></span></div>`);
+    dialog('整理提示词',`<label class="sr-only" for="organizationPrompt">已批注材料到主题材料区的完整提示词</label><textarea id="organizationPrompt" class="organization-prompt" readonly>${escape(p.text)}</textarea><div class="button-row"><button id="copyOrganizationPrompt" class="primary">复制提示词</button><span id="promptCopyState" role="status" aria-live="polite"></span></div>`);
     $('#copyOrganizationPrompt').onclick=busy($('#copyOrganizationPrompt'),async()=>{
       try{await navigator.clipboard.writeText(p.text);$('#promptCopyState').textContent='已复制';}
       catch{$('#organizationPrompt').focus();$('#organizationPrompt').select();$('#promptCopyState').textContent='请手动复制已选中的文字';}
@@ -89,14 +89,14 @@ const KnowledgeUI=(()=>{
   }
   async function showPaths(m){
     const p=await api(`/materials/${m.id}/processing-paths`);
-    dialog('材料保存位置',`${p.vault_available===false?`<p>${escape(p.vault_error)}</p>`:''}<h3>原始收藏</h3><code class="storage-path">${escape(p.local_source)}</code><h3>第一层 · 两条去向</h3>${Object.values(p.first_layer_folders).map(path=>`<code class="storage-path">${escape(path)}</code>`).join('')}<p>原文＋批注。先预览确认，不需要 AI。</p>${m.first_layer?`<h3>这条材料已保存到</h3><code class="storage-path">${escape(m.first_layer.path)}</code>`:''}<h3>主题目录</h3>${p.formal_folders.map(f=>`<code class="storage-path">${escape(f.absolute_path)}</code>`).join('')||'<p>没有可用的正式目录。</p>'}<p>材料归位与个人知识稿分开保存。</p>${m.vault_receipts?.length?'<h3>已确认的文件</h3>'+m.vault_receipts.map(r=>`<code class="storage-path">${escape(r.path)}</code><a class="text-button" href="${escape(noteURL(p.vault,r.note))}">在 Obsidian 打开</a>`).join(''):''}`);
+    dialog('材料保存位置',`${p.vault_available===false?`<p>${escape(p.vault_error)}</p>`:''}<h3>原始收藏</h3><code class="storage-path">${escape(p.local_source)}</code><h3>批注后的保存位置</h3>${Object.values(p.first_layer_folders).map(path=>`<code class="storage-path">${escape(path)}</code>`).join('')}<p>原文＋批注。先预览确认，不需要 AI。</p>${m.first_layer?`<h3>这条材料已保存到</h3><code class="storage-path">${escape(m.first_layer.path)}</code>`:''}<h3>主题目录</h3>${p.formal_folders.map(f=>`<code class="storage-path">${escape(f.absolute_path)}</code>`).join('')||'<p>没有可用的主题目录。</p>'}<p>材料归位与个人知识稿分开保存。</p>${m.vault_receipts?.length?'<h3>已确认的文件</h3>'+m.vault_receipts.map(r=>`<code class="storage-path">${escape(r.path)}</code>`).join(''):''}`);
   }
   async function choose(m){
     const chosen=new Map(refs(m).map(n=>[n.path,n])),mid=m.id;let sequence=0;
     async function show(folder='',query=''){
       const seq=++sequence,data=await api('/vault/notes?'+new URLSearchParams({folder,query}));
       if(seq!==sequence||current?.id!==mid)return;
-      dialog('关联小库已有笔记',`<p>${escape(data.notice)}</p><div class="vault-directory"><button id="vaultParent" class="text-button" ${folder?'':'disabled'}>${icon('back')}上一级</button><span>小库${folder?' / '+escape(folder):''}</span></div><div class="vault-folder-list">${data.directories.map((d,i)=>`<button class="text-button" data-vault-folder="${i}">${icon('book')}${escape(d.title)}</button>`).join('')}</div><div class="vault-search"><input id="vaultQuery" type="search" aria-label="搜索当前目录笔记标题" placeholder="搜索当前目录的笔记标题" value="${escape(query)}"><button id="vaultSearch">搜索</button></div><div class="vault-note-list">${data.notes.map((n,i)=>`<div class="vault-note-row"><label><input type="checkbox" data-vault-note="${i}" ${chosen.has(n.path)?'checked':''}><span>${escape(n.title)}<small>${escape(n.path)}</small></span></label><button class="text-button" data-vault-preview="${i}">看正文</button></div>`).join('')||'<p class="muted">当前目录没有符合条件的笔记，可以进入子目录。</p>'}</div><pre id="vaultNotePreview" class="preview" hidden></pre>${data.limited?'<p class="muted">当前目录结果超过显示上限，未假称已遍历全部；可进入更具体目录或填写笔记路径。</p>':''}<div class="vault-direct-path"><label for="vaultDirectPath">也可粘贴已有笔记的相对路径</label><input id="vaultDirectPath" placeholder="例如 08_专辑学习积累/The money store.md"><button id="vaultAddPath" class="text-button">加入选择</button></div><p id="vaultChosen" class="muted"></p><button id="saveKnowledgeContext" class="primary">保存关联（不修改小库笔记）</button>`);
+      dialog('关联资料文件夹已有笔记',`<p>${escape(data.notice)}</p><div class="vault-directory"><button id="vaultParent" class="text-button" ${folder?'':'disabled'}>${icon('back')}上一级</button><span>资料文件夹${folder?' / '+escape(folder):''}</span></div><div class="vault-folder-list">${data.directories.map((d,i)=>`<button class="text-button" data-vault-folder="${i}">${icon('book')}${escape(d.title)}</button>`).join('')}</div><div class="vault-search"><input id="vaultQuery" type="search" aria-label="搜索当前目录笔记标题" placeholder="搜索当前目录的笔记标题" value="${escape(query)}"><button id="vaultSearch">搜索</button></div><div class="vault-note-list">${data.notes.map((n,i)=>`<div class="vault-note-row"><label><input type="checkbox" data-vault-note="${i}" ${chosen.has(n.path)?'checked':''}><span>${escape(n.title)}<small>${escape(n.path)}</small></span></label><button class="text-button" data-vault-preview="${i}">看正文</button></div>`).join('')||'<p class="muted">当前目录没有符合条件的笔记，可以进入子目录。</p>'}</div><pre id="vaultNotePreview" class="preview" hidden></pre>${data.limited?'<p class="muted">当前目录结果超过显示上限，未假称已遍历全部；可进入更具体目录或填写笔记路径。</p>':''}<div class="vault-direct-path"><label for="vaultDirectPath">也可粘贴已有笔记的相对路径</label><input id="vaultDirectPath" placeholder="例如 08_专辑学习积累/The money store.md"><button id="vaultAddPath" class="text-button">加入选择</button></div><p id="vaultChosen" class="muted"></p><button id="saveKnowledgeContext" class="primary">保存关联（不修改资料文件夹笔记）</button>`);
       function update(){const box=$('#vaultChosen');box.replaceChildren();box.append(document.createTextNode(`已选 ${chosen.size}/5 篇：`));for(const n of chosen.values()){const b=document.createElement('button');b.className='text-button';b.textContent=n.title+' ×';b.title=n.path;b.onclick=()=>{chosen.delete(n.path);const checkbox=data.notes.findIndex(row=>row.path===n.path);if(checkbox>=0)$(`[data-vault-note="${checkbox}"]`).checked=false;update();};box.append(b);}}
       function add(note){if(!chosen.has(note.path)&&chosen.size>=5)throw new Error('最多关联五篇笔记');chosen.set(note.path,note);update();}
       update();$('#vaultParent').onclick=guard(()=>show(folder.split('/').slice(0,-1).join('/')));
@@ -108,7 +108,7 @@ const KnowledgeUI=(()=>{
       $('#saveKnowledgeContext').onclick=busy($('#saveKnowledgeContext'),async()=>{
         if(current?.id!==mid)throw new Error('材料已切换，请重新选择关联');
         const saved=await api(`/materials/${mid}/knowledge-context`,'PUT',{paths:[...chosen.keys()],revision:current.revision});
-        if(current?.id!==mid)return;current.content=saved.content;current.revision=saved.revision;mount(current);$('#dialog').close();toast('已关联小库笔记；原文、理解与处理状态保留。');
+        if(current?.id!==mid)return;current.content=saved.content;current.revision=saved.revision;mount(current);$('#dialog').close();toast('已关联资料文件夹笔记；原文、理解与处理状态保留。');
       });
     }
     await show();
@@ -135,7 +135,7 @@ const KnowledgeUI=(()=>{
   }
   async function showShelfPreview(m,stage,overview){
     const mid=m.id,p=await api(`/materials/${mid}/push-preview`,'POST',{destination:'obsidian',complete_processing:false,shelf_output:{stage,overview}});
-    dialog('确认存入'+shelves[stage],`<p>${stage==='ai_review'?'本次批注与整理结果在同一篇，统一放在待审目录，不先按主题分散。':'第一层按用途集中存放，不自动分散到正式知识目录。'}</p><h3>${shelves[stage]}</h3><code class="storage-path">${escape(p.destination)}</code><pre class="preview">${escape(p.shelf_markdown)}</pre><details><summary>完整原文、图片、字幕与回复</summary><code class="storage-path">${escape(p.source_destination)}</code><pre class="preview">${escape(p.markdown)}</pre></details><p class="muted">${stage==='reference'?'只转入资料备查，不标成已消化。':'保留当前处理状态，不标成已完成。'}</p><div class="button-row">${stage==='reference'?'<button id="editReferenceOverview">返回改概览</button>':''}<button id="confirmShelfOutput" class="primary">确认存入${shelves[stage]}</button></div>`);
+    dialog('确认存入'+shelves[stage],`<p>${stage==='ai_review'?'本次批注与整理结果在同一篇，统一放在待审目录，不先按主题分散。':'已批注材料按用途集中存放，不自动分散到正式知识目录。'}</p><h3>${shelves[stage]}</h3><code class="storage-path">${escape(p.destination)}</code><pre class="preview">${escape(p.shelf_markdown)}</pre><details><summary>完整原文、图片、字幕与回复</summary><code class="storage-path">${escape(p.source_destination)}</code><pre class="preview">${escape(p.markdown)}</pre></details><p class="muted">${stage==='reference'?'只转入资料备查，不标成已消化。':'保留当前处理状态，不标成已完成。'}</p><div class="button-row">${stage==='reference'?'<button id="editReferenceOverview">返回改概览</button>':''}<button id="confirmShelfOutput" class="primary">确认存入${shelves[stage]}</button></div>`);
     $('#editReferenceOverview')?.addEventListener('click',guard(()=>shelf(current,stage,overview)));
     $('#confirmShelfOutput').onclick=busy($('#confirmShelfOutput'),async()=>{await api(`/pushes/${p.id}/confirm`,'POST',{hash:p.hash});$('#dialog').close();await select(mid,true);toast('已存入'+shelves[stage]+'；'+(stage==='reference'?'以后需要时再调取。':'正式沉淀仍由你选择。'));});
   }
@@ -145,14 +145,14 @@ const KnowledgeUI=(()=>{
     if(m.topic==='music'&&folders.some(f=>f.path==='08_专辑学习积累'))$('#knowledgeFolder').value='08_专辑学习积累';
     if(savedDraft?.folder)$('#knowledgeFolder').value=savedDraft.folder;
     $('#knowledgeFolder').insertAdjacentHTML('afterend','<code id="formalFolderPath" class="storage-path"></code>');
-    const showFolder=()=>{$('#formalFolderPath').textContent=paths.formal_folders.find(f=>f.path===$('#knowledgeFolder').value)?.absolute_path||'请选择可用的正式目录';};
+    const showFolder=()=>{$('#formalFolderPath').textContent=paths.formal_folders.find(f=>f.path===$('#knowledgeFolder').value)?.absolute_path||'请选择可用的主题目录';};
     $('#knowledgeFolder').onchange=showFolder;showFolder();
     $('#previewKnowledgeOutput').onclick=busy($('#previewKnowledgeOutput'),async()=>{
       if(current?.id!==mid)throw new Error('材料已切换，请重新打开处理结果');
       const done=$('#knowledgeComplete').checked;
       const edit={title:$('#knowledgeTitle').value,text:$('#knowledgeText').value,folder:$('#knowledgeFolder').value,authorship};
       const p=await api(`/materials/${mid}/push-preview`,'POST',{destination:'obsidian',complete_processing:done,knowledge_output:edit});
-      dialog('确认归位',`<p>确认后迁移文档与图片，清理旧托管位置。</p><h3>${authorship==='manual'?'我的知识稿':'材料'}</h3><code class="storage-path">${escape(p.destination)}</code><pre class="preview">${escape(p.knowledge_markdown)}</pre><details><summary>原文、图片、完整字幕与回复存档</summary><code class="storage-path">${escape(p.source_destination)}</code><pre class="preview">${escape(p.markdown)}</pre></details><p class="muted">${done?'确认后，这条材料移入已完成。':'确认后，保留材料当前处理状态。'}</p><div class="button-row"><button id="editKnowledgeOutput">返回编辑</button><button id="confirmKnowledgeOutput" class="primary">确认新增到小库</button></div>`);
+      dialog('确认归位',`<p>确认后迁移文档与图片，清理旧托管位置。</p><h3>${authorship==='manual'?'我的知识稿':'材料'}</h3><code class="storage-path">${escape(p.destination)}</code><pre class="preview">${escape(p.knowledge_markdown)}</pre><details><summary>原文、图片、完整字幕与回复存档</summary><code class="storage-path">${escape(p.source_destination)}</code><pre class="preview">${escape(p.markdown)}</pre></details><p class="muted">${done?'确认后，这条材料移入已完成。':'确认后，保留材料当前处理状态。'}</p><div class="button-row"><button id="editKnowledgeOutput">返回编辑</button><button id="confirmKnowledgeOutput" class="primary">确认新增到资料文件夹</button></div>`);
       $('#editKnowledgeOutput').onclick=guard(()=>compose(current,done,edit,authorship));
       $('#confirmKnowledgeOutput').onclick=busy($('#confirmKnowledgeOutput'),async()=>{
         const result=await api(`/pushes/${p.id}/confirm`,'POST',{hash:p.hash});$('#dialog').close();await select(mid,true);

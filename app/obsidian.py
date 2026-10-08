@@ -33,7 +33,7 @@ def validate_paths(values,vault):
 
 def configuration():
     vault = Path(root()).resolve()
-    if not vault.is_dir(): raise ValueError('Obsidian 知识库目录不存在或当前不可访问')
+    if not vault.is_dir(): raise ValueError('保存材料的文件夹不存在或当前不可访问')
     return vault
 
 def target(item, pid):
@@ -41,7 +41,7 @@ def target(item, pid):
     title = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', item['title']).strip(' .')[:70] or '材料'
     relative = Path(paths()['archive']) / PLATFORM_FOLDERS[item['platform']] / STATE_FOLDERS[item['processing']] / (title + '--' + pid) / 'index.md'
     if not (vault/relative).resolve().is_relative_to(vault):
-        raise ValueError('Obsidian 分类目录越界')
+        raise ValueError('材料分类目录越界')
     return {'vault':str(vault), 'note':relative.as_posix(), 'path': str(vault / relative),'config_paths':paths()}
 
 
@@ -62,11 +62,11 @@ def create_structure():
              for platform in PLATFORM_FOLDERS.values() for state in STATE_FOLDERS.values()]
     for path in directories:
         if not path.resolve().is_relative_to(vault):
-            raise ValueError('Obsidian 分类目录越界')
+            raise ValueError('材料分类目录越界')
         for ancestor in (path,*path.parents):
             if ancestor==vault:break
             if ancestor.is_symlink() or (ancestor.exists() and getattr(ancestor.lstat(), 'st_file_attributes', 0) & 0x400):
-                raise ValueError('Obsidian 分类目录包含链接，停止创建')
+                raise ValueError('材料分类目录包含链接，停止创建')
         if path.exists() and not path.is_dir():
             raise ValueError('分类路径已有同名文件，停止创建目录')
     for path in directories: path.mkdir(parents=True, exist_ok=True)
@@ -127,7 +127,7 @@ def preflight_target(payload,contents):
     note = (vault / snapshot['note']).resolve()
     allowed = (vault / paths()['archive']).resolve()
     if not allowed.is_relative_to(vault) or not note.is_relative_to(allowed):
-        raise ValueError('Obsidian 导出路径越界')
+        raise ValueError('材料保存路径越界')
     value = {**{k:v for k,v in contents.items() if k not in ('material.md','knowledge.md','shelf.md')}, 'index.md':contents['material.md']}
     preflight_files(note.parent,value)
     return note,value

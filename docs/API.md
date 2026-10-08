@@ -2,7 +2,7 @@
 
 默认地址 `http://127.0.0.1:8766`；完整现行接口表在本机 `/docs`，标准 schema 在 `/openapi.json`。响应版本以 `/api/health` 为准。
 
-写请求必须带 `Content-Type: application/json` 和 `X-Local-Request: 1`。浏览器写请求仅接受本站 Origin；服务默认只对本机开放，不能把这个请求头当成远程身份认证。JSON 中不要传密码、整库文件或与当前任务无关的笔记。
+写请求必须带 `Content-Type: application/json` 和 `X-Local-Request: 1`。一般浏览器写请求仅接受本站 Origin；下文的 Chrome 扩展交接接口是单独受限的例外。服务默认只对本机开放，不能把这个请求头当成远程身份认证。JSON 中不要传密码、整库文件或与当前任务无关的笔记。
 
 ## 收集材料
 
@@ -28,7 +28,17 @@ Content-Type: application/json
 小黑盒优先消费网站的专用收藏接口响应，`transport=heybox_favorites_api`、`endpoint` 和 `checkpoint.offset` 在任务进度中可追溯；不会保存请求Cookie或签名参数。只接受该接口实际返回的帖子ID，校验分页连续性和账号一致性；列表摘要不是完整原文。短页另核对一次返回的下一offset，验证拒绝就停止。未取得接口时只有专用收藏容器兼容回退，且不会标成全部成功。
 - `GET /api/jobs`、`POST /api/jobs/{id}/stop`：任务状态、进度、明确末尾或中断原因。列表任务结束不代表每条正文/图片/字幕都成功。
 
-## 知识库路径
+## 登录连接与 B 站收藏夹
+
+- `POST /api/accounts/{platform}/connect`：生成十分钟、单次使用且绑定平台的连接码，不返回 Cookie。
+- `POST /api/accounts/browser-connect`：扩展发送 `{platform,token,state}` 到本机；只此路由允许 Chrome 扩展 Origin 的 CORS，请求仍需 `X-Local-Request: 1`。错误/过期/重放不得改动已有会话。
+- `POST /api/accounts/{platform}/browser-session`：兼容手动导入本人提供的该平台登录快照。
+- `GET /api/accounts/bilibili/folders`：当前账号自建收藏夹的 `id/title/count`。
+- `POST /api/favorites`：B站可传 `{"platform":"bilibili","folder_ids":["<实际收藏夹ID>"]}`。空选择、非该账号的夹或其他平台传此字段会拒绝。省略字段是兼容的全部自建夹模式；网站入口总是先让本人选择。断点续读沿用原任务范围和收藏夹顺序，不用当前筛选或平台排序改变范围。
+- 同一 BVID 多夹收藏仍对应一条原文；`content.favorite_folders` 和 Markdown 记录夹名。
+- 图片接口 `GET /api/materials/{id}/images/{relative}` 只允许本条已登记的栅格附件，按文件内容给出 MIME 和 inline 响应。
+
+## 保存路径
 
 ```http
 PUT /api/obsidian

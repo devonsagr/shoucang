@@ -16,6 +16,11 @@ def local(tmp_path,monkeypatch):
     monkeypatch.setattr(service,'favorites_worker',lambda:None)
     monkeypatch.setattr(adapters,'public_url',lambda u:None)
     monkeypatch.setattr(sessions,'LOGIN',{})
+    monkeypatch.setattr(sessions,'background_reader',lambda b,context,kind:context.new_page())
+    monkeypatch.setattr(sessions,'target_id',lambda context,page:str(id(page)))
+    monkeypatch.setattr(sessions,'SEEDED',{})
+    from app import chrome_bridge
+    monkeypatch.setattr(chrome_bridge,'PENDING',{})
     with TestClient(main.app,headers={'X-Local-Request':'1'}) as client: yield client,config
 
 def test_douyin_modal_alias_preserves_notes_and_history(local):
@@ -134,7 +139,7 @@ def test_bili_all_folders_checkpoint_not_lost(local,monkeypatch):
         if path.endswith('/nav'):return {'mid':77,'isLogin':True}
         if path.endswith('list-all'):return {'list':[{'id':1,'title':'夹一'},{'id':2,'title':'夹二'}]}
         calls.append((params['media_id'],params['pn']))
-        if params['media_id']==2:raise ValueError('第二个收藏夹权限拒绝')
+        if str(params['media_id'])=='2':raise ValueError('第二个收藏夹权限拒绝')
         return {'medias':[{'bvid':'BVone'}],'has_more':False}
     monkeypatch.setattr(adapters,'bili_api',api)
     monkeypatch.setattr(platform_browser.time,'sleep',lambda _:None)
@@ -143,7 +148,7 @@ def test_bili_all_folders_checkpoint_not_lost(local,monkeypatch):
     next(iterator)
     assert progress['checkpoint']=={'folder':1,'page':1} and len(stored)==1
     with pytest.raises(ValueError,match='权限拒绝'):next(iterator)
-    assert not progress['complete'] and calls==[(1,1),(2,1)]
+    assert not progress['complete'] and calls==[('1',1),('2',1)]
 
 @pytest.mark.parametrize('repair',[False,True])
 def test_favorites_resume_scrolls_past_saved_cards_and_ignores_likes_end(local,monkeypatch,repair):
