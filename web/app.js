@@ -131,8 +131,8 @@ function materialCard(m){
   const preview=(m.excerpt||m.error||fallback).replace(/!\[[^\]]*\]\([^)]*\)/g,'').replace(/!\[[\s\S]*$/g,'').replace(/[*#`]/g,'').replace(/\s+/g,' ').trim();
   return `<div class="material-card ${multiSelect?'selectable':''}">${multiSelect?`<label class="material-check"><input type="checkbox" data-select-id="${escape(m.id)}" aria-label="选择：${escape(displayTitle(m))}" ${checkedMaterials.has(m.id)?'checked':''} ${batchRunning?'disabled':''}></label>`:''}<button class="material-row ${selected===m.id?'selected':''} ${m.thumbnail?'has-image':''}" data-id="${escape(m.id)}" aria-pressed="${selected===m.id}" title="${escape(m.title)}">
     <span class="row-content"><span class="row-title">${escape(displayTitle(m))}</span>
-    <span class="row-meta">${platformIcon(platformKey(m))}<span class="row-platform">${escape(platformName(m))}</span><span class="meta-divider"></span><span>${m.first_layer?(m.first_layer.level===2?'第二层材料':'第一层材料'):m.origin==='favorite'?'我的收藏':'非收藏链接'}</span></span>
-    <span class="row-state ${m.collection}">${m.trashed?'回收站':m.first_layer?escape(captureLabel(m)):(m.reading_intent||m.content?.reading_intent)==='reference'?'资料备查':m.processing==='done'?'已完成':m.processing==='later'?'稍后整理':escape(captureLabel(m))}</span>
+    <span class="row-meta">${platformIcon(platformKey(m))}<span class="row-platform">${escape(platformName(m))}</span><span class="meta-divider"></span><span>${m.first_layer?(m.first_layer.level===2?'第二层材料':'第一层材料'):m.origin==='favorite'?'我的收藏':'非收藏链接'}</span>
+    <span class="row-state ${m.collection}">${m.trashed?'回收站':m.first_layer?escape(captureLabel(m)):(m.reading_intent||m.content?.reading_intent)==='reference'?'资料备查':m.processing==='done'?'已完成':m.processing==='later'?'稍后整理':escape(captureLabel(m))}</span></span>
     <span class="row-preview">${escape(preview||fallback)}</span></span>
     <span class="row-cover ${platformKey(m)} ${m.thumbnail?'':'no-cover'}">${m.thumbnail?`<img src="${materialImageUrl(m.id,m.thumbnail)}" alt="" loading="lazy">`:platformIcon(platformKey(m))}</span>
   </button><button class="quick-delete icon-button" data-trash-id="${escape(m.id)}" data-restore="${Boolean(m.trashed)}" title="${m.trashed?'彻底删除材料':'删除材料，可恢复'}" aria-label="${m.trashed?'彻底删除':'删除'}：${escape(displayTitle(m))}">${icon('trash')}</button></div>`;
@@ -808,6 +808,9 @@ document.querySelectorAll('[data-platform]').forEach(b=>b.onclick=guard(()=>choo
 
 let searchTimer;$('#search').oninput=()=>{clearTimeout(searchTimer);searchTimer=setTimeout(guard(refresh),250);};
 $('#captureFilter').onchange=guard(async()=>{visibleLimit=80;await refresh();});
+// The compact filter menu stays inside the material column.
+document.addEventListener('click',event=>{const menu=$('.library-filters');if(menu?.open&&!menu.contains(event.target))menu.open=false;});
+document.addEventListener('keydown',event=>{const menu=$('.library-filters');if(event.key==='Escape'&&menu?.open){menu.open=false;menu.querySelector('summary').focus();}});
 $('#platformFilter').onchange=guard(()=>choosePlatform($('#platformFilter').value));$('#originFilter').onchange=guard(refresh);
 window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});
 let initialPlatform='';try{const saved=localStorage.getItem('selectedPlatform');if(saved!==null&&(saved===''||names[saved]))initialPlatform=saved;}catch{}
