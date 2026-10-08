@@ -167,12 +167,12 @@ def test_bili_subtitles_and_favorites_pagination(tmp_path,monkeypatch):
     calls=[]
     def bili(path,params):
         calls.append((path,params))
-        if path.endswith('/view'):return {'bvid':'BV1TST001604','cid':1,'title':'测试','desc':'说明','pages':[{'cid':1}]}
+        if path.endswith('/view'):return {'bvid':'BV1TST001606','cid':1,'title':'测试','desc':'说明','pages':[{'cid':1}]}
         if path.endswith('/v2'):return {'subtitle':{'subtitles':[{'lan':'ai-zh','ai_type':1,'subtitle_url':'https://example.org/sub'}]}}
         return {'has_more':params['pn']==1,'medias':[{'bvid':f'BV{params["pn"]}','title':'收藏'}]}
     monkeypatch.setattr(adapters,'bili_api',bili)
     monkeypatch.setattr(adapters,'fetch',lambda *args:('{"body":[{"from":1,"to":3,"content":"字幕"}]}','https://example.org/sub'))
-    r=adapters.bili_video('https://www.bilibili.com/video/BV1TST001604',tmp_path)
+    r=adapters.bili_video('https://www.bilibili.com/video/BV1TST001606',tmp_path)
     assert '机器生成' in r['content']['subtitle_source'] and r['collection']=='ready'
     items,limited=adapters.favorites('https://space.bilibili.com/123/favlist?fid=456')
     assert len(items)==2 and not limited

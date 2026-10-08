@@ -17,7 +17,7 @@ Content-Type: application/json
 `origin` 为 `favorite` 或 `link`。通常仅提供链接即可排队；也可明确提供 `text`、`title`、`subtitles`、`subtitle_format`、`subtitle_source` 和 `language`。响应含材料 ID；重复来源返回 `duplicate: true`。永久删除的来源返回 `retired: true` 并跳过，不应据此假称新材料已抓取成功。只有本人明确选择重新收集时使用 `recollect_deleted: true`。
 
 - `GET /api/materials`：按平台、主题、处理/采集状态、来源和全文查询；返回条目和当前范围计数。
-- `GET /api/materials/{id}`：原文、字幕来源、分段、批注、历史与当前任务。`reading_preview` 仅供界面筛选，不属于处理输入或持久化摘要。
+- `GET /api/materials/{id}`：原文、字幕来源、分段、批注、历史与当前任务。`reading_preview` 是不调用模型的上下文导读；`reading_overview` 是主动生成的独立概要缓存，两者仅供界面筛选，不属于后续整理或导出输入。`overview_source_hash` 用于提交前核对来源，`overview_job` 返回生成进度。
 - `POST /api/materials/{id}/retry`：重试未完整内容；`{"refresh":true}` 主动刷新旧正文，批注和历史保留。
 - `POST /api/accounts/{platform}/login`：`{"action":"open","url":"该平台的原文链接"}` 打开同平台验证页；`url` 可省略，默认登录或收藏入口。本人完成后用 `{"action":"save"}` 保存；小黑盒页面仍有可见验证时拒绝保存。`GET /api/accounts` 的 `access_required` 表示仍需本人处理。
 - `POST /api/import`：TXT 转换后的 URL 项目或含 url/origin/text 的 JSON 数组。
@@ -26,6 +26,8 @@ Content-Type: application/json
 默认只为新来源排队正文。明确传 `repair_incomplete: true` 时，同时为本次清单返回的既有失败、部分完成或暂停材料排队补齐；不重采已完整材料、不恢复删除记录，不补采清单外条目。`repair_queued` 是排队数，不是成功数。续读保留原任务的此选项。小黑盒通过网页重新触发原生分页并跳过已登记ID，进度里的offset用于追踪，不伪造签名直接跳过网页前几页。
 
 小黑盒优先消费网站的专用收藏接口响应，`transport=heybox_favorites_api`、`endpoint` 和 `checkpoint.offset` 在任务进度中可追溯；不会保存请求Cookie或签名参数。只接受该接口实际返回的帖子ID，校验分页连续性和账号一致性；列表摘要不是完整原文。短页另核对一次返回的下一offset，验证拒绝就停止。未取得接口时只有专用收藏容器兼容回退，且不会标成全部成功。
+- `GET /api/tasks?limit=40`：全局只读任务快照，`counts` 统计所有进行中/等待及尚未被新尝试替代的失败/暂停，`active`、`attention`、`recent` 每组最多 `limit` 条（1–100），不返回 payload。最近结束保留旧失败历史；较新重试替代需处理状态。关闭该窗口、切换平台和状态轮询均不取消任务。
+- `POST /api/materials/{id}/overview`：`{"source_hash":"<当前来源哈希>","force":false}`，仅原始材料；主动生成阅读概要，同条进行中任务去重，匹配缓存可复用，`force` 主动重新生成。未配置模型/无正文字幕/来源过期/超过18万字符返回400。远程服务发原文和字幕，本机 loopback 服务允许无密钥；不发送批注或关联笔记。
 - `GET /api/jobs`、`POST /api/jobs/{id}/stop`：任务状态、进度、明确末尾或中断原因。列表任务结束不代表每条正文/图片/字幕都成功。
 
 ## 登录连接与 B 站收藏夹

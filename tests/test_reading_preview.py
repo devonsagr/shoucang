@@ -27,3 +27,15 @@ def test_reading_preview_is_not_saved_or_exported(local):
     assert store.get(mid)==before and 'reading_preview' not in store.markdown(before)
     payload=client.post('/api/materials/'+mid+'/push-preview',json={'destination':'markdown'}).json()['payload']
     assert 'reading_preview' not in payload and '原文摘录' not in payload['markdown']
+
+
+def test_context_is_kept_instead_of_picking_repeated_dates_and_platform_fragments():
+    text='《合成冒险》是一款多人协作游戏，这篇报道介绍了开发团队宣布的主机发行计划。\n\n也将会登陆Switch 2平台\n\n游戏将在10月16号在Switch发售，新增的协作模式允许四名玩家共同挑战关卡。\n\nSwitch平台支持跨平台存档。'*2
+    result=reading_preview.make({'body':text,'content':{}})
+    assert result['text'].startswith('《合成冒险》')
+    assert '发行计划' in result['text'] and '协作模式' in result['text']
+    assert result['source']=='原文导读' and not result['model_used']
+
+def test_fragments_and_ui_noise_do_not_become_a_fake_subject():
+    text='收藏 123\n\n也将登陆Switch平台，发布日期会稍后公布。\n\n此外会推出新的音乐版本，更多信息将在后续公布。'*3
+    assert reading_preview.make({'body':text,'content':{}}) is None

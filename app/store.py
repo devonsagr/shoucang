@@ -82,6 +82,10 @@ def init():
           files_json TEXT NOT NULL,state TEXT NOT NULL DEFAULT 'live',restore_json TEXT NOT NULL DEFAULT '{}',
           replacement_id TEXT NOT NULL DEFAULT '',updated TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS vault_exports_owner ON vault_exports(owner_id);
+        CREATE TABLE IF NOT EXISTS reading_overviews (
+          material_id TEXT PRIMARY KEY,source_hash TEXT NOT NULL,text TEXT NOT NULL,model TEXT NOT NULL,
+          local_model INTEGER NOT NULL,basis TEXT NOT NULL,created TEXT NOT NULL);
+        CREATE INDEX IF NOT EXISTS jobs_activity ON jobs(state,updated);
         CREATE TABLE IF NOT EXISTS retired_sources (
           identity TEXT PRIMARY KEY,material_id TEXT NOT NULL,platform TEXT NOT NULL,retired_at TEXT NOT NULL);
         ''')
@@ -310,7 +314,7 @@ def purge(mid, revision, confirmation):
             if c.execute('SELECT 1 FROM first_layers WHERE source_push_id=? AND id<>?',(pid,mid)).fetchone():continue
             local_files.append(DATA/'outbox'/'obsidian'/pid)
         file_change.stash_local(c,local_files)
-        for table in ('versions', 'events', 'jobs'):
+        for table in ('versions', 'events', 'jobs', 'reading_overviews'):
             c.execute(f'DELETE FROM {table} WHERE material_id=?', (mid,))
         c.execute("DELETE FROM pushes WHERE material_id=? AND state<>'confirmed'", (mid,))
         c.execute('DELETE FROM '+table_for(mid)+' WHERE id=?', (mid,))

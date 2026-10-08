@@ -354,9 +354,23 @@ function renderTranscript(m){
   renderVideoTranscript(m);
 }
 function renderReadingPreview(m){
-  const p=m.reading_preview;
-  if(!p?.reading_only||p.model_used!==false||!p.text)return '';
-  return `<details class="reading-preview" open><summary><span>速览</span><span class="preview-source">${escape(p.source)}${icon('chevron')}</span></summary><div>${p.text.split('\n').filter(Boolean).map(text=>`<p>${escape(text)}</p>`).join('')}</div></details>`;
+  const guide=m.reading_preview?.reading_only&&m.reading_preview.model_used===false?m.reading_preview:null;
+  const result=m.reading_overview?.reading_only&&m.reading_overview.model_used===true?m.reading_overview:null;
+  const eligible=m.id&&!m.first_layer&&!m.trashed&&m.content?.media_kind!=='video_reference'&&(m.body?.trim()||m.content?.segments?.length);
+  if(!guide&&!result&&!eligible)return '';
+  const job=m.overview_job,active=job&&['queued','running'].includes(job.state);
+  return '<section id="readingOverview" class="reading-overview"><div class="overview-heading"><h3>概要</h3>'+(eligible?'<button type="button" data-overview="generate" data-material="'+escape(m.id)+'" '+(active?'disabled':'')+' title="'+(m.overview_engine?.local?'使用本机模型':'原文和字幕将发送给设置中的模型服务')+'，仅供筛选">'+(active?'生成中…':result?'重新生成':'生成概要')+'</button>':'')+'</div>'+(result?'<p class="overview-text">'+escape(result.text).replace(/\s*\n\s*/g,' ')+'</p><span class="overview-source">'+escape(result.source)+' · 仅供筛选'+(result.basis?.includes('部分')?' · 基于部分文字':'')+'</span>':guide?'<details class="reading-preview"><summary><span>'+escape(guide.source)+'</span><span class="preview-source">非AI'+icon('chevron')+'</span></summary><div><p>'+escape(guide.text).replace(/\n/g,' ')+'</p></div></details>':'')+(active?'<p class="overview-job" role="status">'+escape(job.progress?.message||'等待生成概要')+'</p>':job?.state==='failed'?'<p class="overview-error" role="status">'+escape(job.error)+'</p>':'')+'<div class="overview-notice" role="status" hidden></div></section>';
+}
+function updateReadingOverview(m){
+  if(!current||m.id!==selected||current.overview_source_hash!==m.overview_source_hash)return;
+  const existing=$('#readingOverview');if(!existing)return;
+  const signature=JSON.stringify([m.reading_overview,m.overview_job]);
+  if(existing.dataset.signature===signature)return;
+  const expanded=existing.querySelector('details')?.open;
+  existing.outerHTML=renderReadingPreview(m);
+  const fresh=$('#readingOverview');fresh.dataset.signature=signature;
+  if(fresh.querySelector('details'))fresh.querySelector('details').open=Boolean(expanded);
+  current.reading_overview=m.reading_overview;current.overview_job=m.overview_job;
 }
 function renderDetail(m) {
   captionList?.destroy();captionList=null;
@@ -736,7 +750,8 @@ $('#xConnectBtn').onclick=guard(()=>favoritesDialog());
 $('#syncBtn').onclick=guard(()=>favoritesDialog());
 
 $('#capabilitiesBtn').onclick=guard(async()=>{const caps=await api('/capabilities');dialog('平台能力与边界',caps.map(c=>`<section class="capability"><h3>${escape(c.name)}</h3><p>收藏：${escape(c.favorites)}</p><p>内容：${escape(c.content)}</p><p class="muted">${escape(c.status)}</p></section>`).join(''));});
-$('#jobsBtn').onclick=guard(async()=>{const jobs=await api('/jobs');dialog('任务记录',`<p class="muted">显示最近更新的 200 条任务。失败的材料可在详情中重试；列表读取失败可重新提交。暂停与回收站任务不会自动恢复。</p>${jobs.length?jobs.map(j=>`<div class="job"><strong>${({collect:'收集',images:'存档图片',ai:'AI 整理',sync:'读取收藏列表',x_sync:'读取 X 收藏',x_check:'验证 X 账号',subtitle_tracks:'读取双语字幕',favorites:'读取平台收藏'})[j.kind]} · ${({queued:'等待中',running:'执行中',done:'任务结束',failed:'失败',paused:'已暂停',cancelled:'已取消'})[j.state]}</strong><p class="muted">${new Date(j.created).toLocaleString('zh-CN')}</p>${j.progress?.message?`<p>${escape(j.progress.message)}</p>`:''}${j.error?`<p>${escape(j.error)}</p>`:''}</div>`).join(''):'<p>还没有后台任务。</p>'}`);});
+$('#jobsBtn').onclick=()=>TaskMonitor.open();
+
 async function copyPath(value,field){
   try{await navigator.clipboard.writeText(value);toast('已复制');}catch{if(field){field.focus();field.select();}toast('请复制选中的路径');}
 }
@@ -800,7 +815,26 @@ try{const saved=localStorage.getItem('selectedTopic');if(saved===''||topics[save
 $('#platformFilter').value=initialPlatform;document.querySelectorAll('[data-platform]').forEach(b=>{b.classList.toggle('active-platform',b.dataset.platform===initialPlatform);b.setAttribute('aria-pressed',String(b.dataset.platform===initialPlatform));});
 try{if(localStorage.getItem('collectionGroup')==='first')filter=localStorage.getItem('firstTrack')==='digest'?'digest':'callable';}catch{}
 if(inFirstLibrary())clearReader();
+TaskMonitor.init({api,escape,icon,names});
 guard(refresh)();
 
 let polling=false;
-setInterval(async()=>{if(polling||document.hidden)return;polling=true;try{await refresh();if(selected&&!$('#dialog').open){const m=await api('/materials/'+selected);if(m.id!==selected)return;if($('#captureProgress')){$('#captureProgress').textContent=m.progress?.message||'';$('#captureProgress').hidden=!m.progress?.message;}if($('#videoWorkbench'))updateSubtitleJob(m);if(current){current.translation_job=m.translation_job;updateTranslationJob(current);current.ai_job=m.ai_job;KnowledgeUI.updateJob(current);}if(current&&(m.revision!==current.revision||m.collection!==current.collection||m.error!==current.error||m.processing!==current.processing)){if(translationOnly(current,m))acceptTranslation(m);else if(!dirty&&document.activeElement?.id!=='notesText'){current=m;renderDetail(m);}}}}catch{}finally{polling=false;}},2000);
+setInterval(async()=>{if(polling||document.hidden)return;polling=true;try{await refresh();if(selected&&!$('#dialog').open){const m=await api('/materials/'+selected);if(m.id!==selected)return;if($('#captureProgress')){$('#captureProgress').textContent=m.progress?.message||'';$('#captureProgress').hidden=!m.progress?.message;}if($('#videoWorkbench'))updateSubtitleJob(m);updateReadingOverview(m);if(current){current.translation_job=m.translation_job;updateTranslationJob(current);current.ai_job=m.ai_job;KnowledgeUI.updateJob(current);}if(current&&(m.revision!==current.revision||m.collection!==current.collection||m.error!==current.error||m.processing!==current.processing)){if(translationOnly(current,m))acceptTranslation(m);else if(!dirty&&document.activeElement?.id!=='notesText'){current=m;renderDetail(m);}}}}catch{}finally{polling=false;}},2000);
+
+document.addEventListener('click',event=>{
+  const button=event.target.closest('[data-overview]');if(!button)return;
+  if(button.dataset.overview==='settings'){$('#settingsBtn').click();return;}
+  if(button.dataset.material!==selected||!current)return;
+  const mid=selected,hash=current.overview_source_hash;
+  button.disabled=true;
+  (async()=>{
+    try{
+      await api('/materials/'+mid+'/overview','POST',{source_hash:hash,force:Boolean(current.reading_overview)});
+      TaskMonitor.refresh();
+      if(selected===mid){const next=await api('/materials/'+mid);updateReadingOverview(next);}
+    }catch(error){
+      if(selected!==mid)return;
+      const notice=$('#readingOverview .overview-notice');if(notice){notice.hidden=false;notice.innerHTML=escape(error.message)+(current.overview_engine?.available?'':' <button type="button" data-overview="settings">设置模型</button>');}
+    }finally{if(button.isConnected)button.disabled=Boolean(current?.id===mid&&['queued','running'].includes(current.overview_job?.state));}
+  })();
+});

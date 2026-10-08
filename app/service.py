@@ -389,6 +389,11 @@ def run_job(job):
         folder = store.material_folder(mid) / ('subtitles-' + job['id'])
         folder.mkdir(parents=True, exist_ok=True)
         save_secondary_subtitles(mid, folder)
+    elif job['kind'] == 'overview':
+        from . import overview
+        def report(progress):
+            with store.db() as c:c.execute('UPDATE jobs SET progress=?,updated=? WHERE id=?',(store.dumps(progress),store.now(),job['id']))
+        overview.generate(job,report)
     elif job['kind'] == 'bilingual':
         def report(progress):
             with store.db() as c:c.execute('UPDATE jobs SET progress=?,updated=? WHERE id=?',(store.dumps(progress),store.now(),job['id']))
@@ -558,7 +563,7 @@ def worker(favorites_only=False):
             # Enumerate X bookmarks first, before spending further reads on individual replies.
             x_detail_gate=" AND NOT (kind='collect' AND (EXISTS (SELECT 1 FROM materials m JOIN jobs f ON f.kind='favorites' AND f.state IN ('queued','running') AND json_extract(f.payload,'$.platform')=m.platform WHERE m.id=jobs.material_id AND m.platform IN ('x','heybox')) OR (material_id IN (SELECT id FROM materials WHERE platform='x') AND EXISTS (SELECT 1 FROM jobs i WHERE i.kind='images' AND i.material_id=jobs.material_id AND i.state IN ('queued','running')))))" if not favorites_only else ''
             # Explicit imports/retries and AI actions should not wait behind hundreds of bookmark enrichments.
-            priority="CASE WHEN kind IN ('ai','subtitle_tracks','bilingual') OR (kind='collect' AND json_extract(payload,'$.x_seed') IS NULL) THEN 0 WHEN kind='images' THEN 1 ELSE 2 END"
+            priority="CASE WHEN kind IN ('ai','subtitle_tracks','bilingual','overview') OR (kind='collect' AND json_extract(payload,'$.x_seed') IS NULL) THEN 0 WHEN kind='images' THEN 1 ELSE 2 END"
             row = c.execute("SELECT * FROM jobs WHERE state='queued' AND "+kind_filter+x_detail_gate+" ORDER BY "+priority+", created LIMIT 1").fetchone()
             if row:
                 c.execute("UPDATE jobs SET state='running',updated=? WHERE id=?", (store.now(), row['id']))

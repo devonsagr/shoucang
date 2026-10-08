@@ -15,7 +15,7 @@ def local(tmp_path, monkeypatch):
 
 
 def material(client):
-    return client.post('/api/materials', json={'url':'https://www.youtube.com/watch?v=TST00001606',
+    return client.post('/api/materials', json={'url':'https://www.youtube.com/watch?v=TST00001608',
         'title':'字幕夹具', 'text':'保留视频说明', 'subtitles':'WEBVTT\n\n00:00:01.000 --> 00:00:03.000\n原字幕\n',
         'language':'zh', 'subtitle_source':'平台字幕'}).json()['id']
 

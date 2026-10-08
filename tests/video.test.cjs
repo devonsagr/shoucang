@@ -7,10 +7,10 @@ vm.createContext(context);
 vm.runInContext(fs.readFileSync('web/video.js','utf8')+'\nthis.reader=VideoReader;',context);
 const r=context.reader;
 const material=(platform,url,content={})=>({platform,url,content});
-assert.equal(r.target(material('youtube','https://youtu.be/TST00001606')).id,'TST00001606');
-for(const url of ['https://youtube.com.evil.test/watch?v=TST00001606','javascript:alert(1)','https://user@youtube.com/watch?v=TST00001606','https://youtube.com:444/watch?v=TST00001606'])assert.equal(r.target(material('youtube',url)),null);
-assert.equal(r.target(material('x','https://youtu.be/TST00001606')),null);
-const bili=r.target(material('bilibili','https://www.bilibili.com/video/BV1TST001604?p=3'));
+assert.equal(r.target(material('youtube','https://youtu.be/TST00001608')).id,'TST00001608');
+for(const url of ['https://youtube.com.evil.test/watch?v=TST00001608','javascript:alert(1)','https://user@youtube.com/watch?v=TST00001608','https://youtube.com:444/watch?v=TST00001608'])assert.equal(r.target(material('youtube',url)),null);
+assert.equal(r.target(material('x','https://youtu.be/TST00001608')),null);
+const bili=r.target(material('bilibili','https://www.bilibili.com/video/BV1TST001606?p=3'));
 const embed=new URL(r.embedUrl(bili,'http://localhost:8766',81.5,true));
 assert.equal(embed.hostname,'player.bilibili.com');assert.equal(embed.searchParams.get('p'),'3');assert.equal(embed.searchParams.get('t'),'81.5');assert.equal(embed.searchParams.get('autoplay'),'1');
 assert.equal(r.target(material('douyin','https://www.douyin.com/note/9000000000000000957')),null);
@@ -24,7 +24,7 @@ function frame(){return {src:'',removeAttribute(name){if(name==='src')this.src='
 (async()=>{
   let events,seekCalls=[],destroyed=0,status=[];
   const yt={Player:function(_frame,options){events=options.events;this.seekTo=(...args)=>seekCalls.push(args);this.playVideo=()=>seekCalls.push(['play']);this.getCurrentTime=()=>12.4;this.getPlayerState=()=>1;this.destroy=()=>destroyed++;}};
-  const target=r.target(material('youtube','https://www.youtube.com/watch?v=TST00001606'));
+  const target=r.target(material('youtube','https://www.youtube.com/watch?v=TST00001608'));
   let observed;
   const f=frame(),controller=r.mount(f,target,{origin:'http://localhost:8766',onStatus:s=>status.push(s),onTime:t=>observed=t,loadApi:()=>Promise.resolve(yt)});
   assert.equal(controller.seek(82.25),true);await Promise.resolve();events.onReady();

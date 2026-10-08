@@ -10,7 +10,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from . import chrome_bridge, adapters, assets, bilingual, first_layer, knowledge, obsidian, playback, reading_preview, service, store, topics, vault_files, xbookmarks, sessions, platform_browser, xofficial
+from . import chrome_bridge, adapters, assets, bilingual, first_layer, knowledge, obsidian, playback, reading_preview, overview, task_status, service, store, topics, vault_files, xbookmarks, sessions, platform_browser, xofficial
 
 @asynccontextmanager
 async def lifespan(app):
@@ -26,7 +26,7 @@ async def lifespan(app):
     thread.join(timeout=2)
     favorite_thread.join(timeout=2)
 
-app = FastAPI(title='藏页 · 多平台收藏与批注', version='0.5.6', lifespan=lifespan, docs_url=None, redoc_url=None)
+app = FastAPI(title='藏页 · 多平台收藏与批注', version='0.5.7', lifespan=lifespan, docs_url=None, redoc_url=None)
 
 @app.get('/design/v6/reference-{variant}.png')
 def new_design_reference(variant: Literal['a','b','c','d','e','f','g']):
@@ -436,6 +436,13 @@ def detail(mid: str):
                                           'state':location['state'] if location else 'legacy','stage':outcome.get('stage','formal')})
     item['markdown'] = store.markdown(item)
     item['reading_preview']=reading_preview.make(item)
+    item['reading_overview']=overview.current(item)
+    item['overview_source_hash']=overview.identity(item)
+    model=overview.engine();item['overview_engine']={'available':model['available'],'local':model['local']}
+    with store.db() as c:
+        row=c.execute("SELECT id,state,error,progress FROM jobs WHERE material_id=? AND kind='overview' ORDER BY created DESC,rowid DESC LIMIT 1",(mid,)).fetchone()
+    item['overview_job']=dict(row) if row else None
+    if item['overview_job']:item['overview_job']['progress']=json.loads(item['overview_job']['progress'])
     return item
 
 @app.get('/api/materials/{mid}/markdown', response_class=PlainTextResponse)
@@ -717,6 +724,19 @@ def sync(body: SyncInput):
     with store.db() as c:
         jid = store.enqueue(c, 'sync', body.model_dump())
     return {'job_id': jid}
+
+@app.get('/api/tasks')
+def task_activity(limit: int=40):
+    if not 1<=limit<=100:raise ValueError('任务显示条数应在1至100之间')
+    return task_status.snapshot(limit)
+
+class OverviewInput(BaseModel):
+    source_hash: str = Field(default='',max_length=64)
+    force: bool = False
+
+@app.post('/api/materials/{mid}/overview')
+def generate_overview(mid:str,body:OverviewInput):
+    return overview.queue(mid,body.source_hash,body.force)
 
 @app.get('/api/jobs')
 def jobs():
